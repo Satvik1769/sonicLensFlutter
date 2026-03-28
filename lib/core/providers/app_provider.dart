@@ -102,8 +102,8 @@ class AppProvider extends ChangeNotifier {
     return token;
   }
 
-  Future<bool> register(String username, String password) =>
-      _api.register(username, password);
+  Future<bool> register(String username, String password, String email) =>
+      _api.register(username, password, email);
 
   Future<void> logout() async {
     _authToken = null;

@@ -37,13 +37,13 @@ class ApiService {
   }
 
   /// Returns true if registration succeeded.
-  Future<bool> register(String username, String password) async {
+  Future<bool> register(String username, String password, String email) async {
     try {
       final res = await http
           .post(
             _uri('/auth/register'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'username': username, 'password': password}),
+            body: jsonEncode({'username': username, 'password': password, 'email' : email }),
           )
           .timeout(const Duration(seconds: 15));
       return res.statusCode == 200 || res.statusCode == 201;

@@ -83,11 +83,21 @@ class _HomeScreenState extends State<HomeScreen>
               letterSpacing: 1,
             ),
           ),
-          // Android: Shizuku badge. iOS: mic badge.
-          if (AudioCaptureService.isSupported)
-            _ShizukuBadge(available: provider.shizukuAvailable)
-          else
-            const _MicBadge(),
+          Row(
+            children: [
+              // Android: Shizuku badge. iOS: mic badge.
+              if (AudioCaptureService.isSupported)
+                _ShizukuBadge(available: provider.shizukuAvailable)
+              else
+                const _MicBadge(),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.logout, color: Colors.white38, size: 20),
+                tooltip: 'Log out',
+                onPressed: () => provider.logout(),
+              ),
+            ],
+          ),
         ],
       ),
     );

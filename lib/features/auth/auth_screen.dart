@@ -15,20 +15,19 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   bool _isLogin = true;
 
-  final _userCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  final _confirmCtrl = TextEditingController();
+  final _usernameCtrl = TextEditingController();
 
   bool _obscurePass = true;
-  bool _obscureConfirm = true;
   bool _busy = false;
   String? _error;
 
   @override
   void dispose() {
-    _userCtrl.dispose();
+    _emailCtrl.dispose();
     _passCtrl.dispose();
-    _confirmCtrl.dispose();
+    _usernameCtrl.dispose();
     super.dispose();
   }
 
@@ -37,28 +36,28 @@ class _AuthScreenState extends State<AuthScreen> {
       _isLogin = !_isLogin;
       _error = null;
       _passCtrl.clear();
-      _confirmCtrl.clear();
+      _usernameCtrl.clear();
     });
   }
 
   Future<void> _submit(AppProvider provider) async {
-    final email = _userCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
     final password = _passCtrl.text;
+    final username = _usernameCtrl.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
       setState(() => _error = 'Please fill in all fields.');
       return;
     }
 
-    if (!_isLogin) {
-      if (password != _confirmCtrl.text) {
-        setState(() => _error = 'Passwords do not match.');
-        return;
-      }
-      if (password.length < 6) {
-        setState(() => _error = 'Password must be at least 6 characters.');
-        return;
-      }
+    if (!_isLogin && username.isEmpty) {
+      setState(() => _error = 'Please enter a username.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setState(() => _error = 'Password must be at least 6 characters.');
+      return;
     }
 
     setState(() {
@@ -72,7 +71,7 @@ class _AuthScreenState extends State<AuthScreen> {
         if (!mounted) return;
         if (token == null) setState(() => _error = 'Invalid email or password.');
       } else {
-        final ok = await provider.register(email, password);
+        final ok = await provider.register(username, password, email);
         if (!mounted) return;
         if (ok) {
           // Auto-login after register
@@ -85,7 +84,7 @@ class _AuthScreenState extends State<AuthScreen> {
             });
           }
         } else {
-          setState(() => _error = 'Registration failed. Username may be taken.');
+          setState(() => _error = 'Registration failed. Email or username may be taken.');
         }
       }
     } finally {
@@ -148,15 +147,12 @@ class _AuthScreenState extends State<AuthScreen> {
                   // Card
                   _AuthCard(
                     isLogin: _isLogin,
-                    userCtrl: _userCtrl,
+                    emailCtrl: _emailCtrl,
                     passCtrl: _passCtrl,
-                    confirmCtrl: _confirmCtrl,
+                    usernameCtrl: _usernameCtrl,
                     obscurePass: _obscurePass,
-                    obscureConfirm: _obscureConfirm,
                     onTogglePass: () =>
                         setState(() => _obscurePass = !_obscurePass),
-                    onToggleConfirm: () =>
-                        setState(() => _obscureConfirm = !_obscureConfirm),
                     busy: _busy,
                     error: _error,
                     onSubmit: () => _submit(provider),
@@ -224,13 +220,11 @@ class _Logo extends StatelessWidget {
 
 class _AuthCard extends StatelessWidget {
   final bool isLogin;
-  final TextEditingController userCtrl;
+  final TextEditingController emailCtrl;
   final TextEditingController passCtrl;
-  final TextEditingController confirmCtrl;
+  final TextEditingController usernameCtrl;
   final bool obscurePass;
-  final bool obscureConfirm;
   final VoidCallback onTogglePass;
-  final VoidCallback onToggleConfirm;
   final bool busy;
   final String? error;
   final VoidCallback onSubmit;
@@ -238,13 +232,11 @@ class _AuthCard extends StatelessWidget {
 
   const _AuthCard({
     required this.isLogin,
-    required this.userCtrl,
+    required this.emailCtrl,
     required this.passCtrl,
-    required this.confirmCtrl,
+    required this.usernameCtrl,
     required this.obscurePass,
-    required this.obscureConfirm,
     required this.onTogglePass,
-    required this.onToggleConfirm,
     required this.busy,
     required this.error,
     required this.onSubmit,
@@ -291,12 +283,26 @@ class _AuthCard extends StatelessWidget {
 
             const SizedBox(height: 24),
 
-            // Username
+            // Username (register only)
+            if (!isLogin) ...[
+              const SizedBox(height: 14),
+              _Field(
+                controller: usernameCtrl,
+                label: 'Username',
+                hint: 'your_username',
+                prefixIcon: Icons.person_outline,
+              ),
+            ],
+
+            const SizedBox(height: 14),
+
+            // Email
             _Field(
-              controller: userCtrl,
-              label: 'Username',
-              hint: 'your_username',
-              prefixIcon: Icons.person_outline,
+              controller: emailCtrl,
+              label: 'Email',
+              hint: 'you@example.com',
+              prefixIcon: Icons.email_outlined,
+              keyboardType: TextInputType.emailAddress,
             ),
 
             const SizedBox(height: 14),
@@ -317,26 +323,6 @@ class _AuthCard extends StatelessWidget {
                 onPressed: onTogglePass,
               ),
             ),
-
-            // Confirm password (register only)
-            if (!isLogin) ...[
-              const SizedBox(height: 14),
-              _Field(
-                controller: confirmCtrl,
-                label: 'Confirm password',
-                hint: '••••••••',
-                prefixIcon: Icons.lock_outline,
-                obscure: obscureConfirm,
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    obscureConfirm ? Icons.visibility_off : Icons.visibility,
-                    color: Colors.white24,
-                    size: 18,
-                  ),
-                  onPressed: onToggleConfirm,
-                ),
-              ),
-            ],
 
             // Error
             if (error != null) ...[
@@ -438,6 +424,7 @@ class _Field extends StatelessWidget {
   final IconData prefixIcon;
   final bool obscure;
   final Widget? suffixIcon;
+  final TextInputType? keyboardType;
 
   const _Field({
     required this.controller,
@@ -446,6 +433,7 @@ class _Field extends StatelessWidget {
     required this.prefixIcon,
     this.obscure = false,
     this.suffixIcon,
+    this.keyboardType,
   });
 
   @override
@@ -459,6 +447,7 @@ class _Field extends StatelessWidget {
         TextField(
           controller: controller,
           obscureText: obscure,
+          keyboardType: keyboardType,
           style: const TextStyle(color: Colors.white, fontSize: 14),
           decoration: InputDecoration(
             hintText: hint,
