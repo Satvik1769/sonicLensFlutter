@@ -131,7 +131,7 @@ class ApiService {
     try {
       final res = await http
           .get(_uri('/trending'), headers: _authHeader)
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 60));
       if (res.statusCode != 200) return null;
       return TrendingResponse.fromJson(
           jsonDecode(res.body) as Map<String, dynamic>);

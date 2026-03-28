@@ -32,11 +32,11 @@ class Song {
 
   factory Song.fromJson(Map<String, dynamic> json) => Song(
         id: (json['id'] as num?)?.toInt() ?? 0,
-        title: json['title'] as String? ?? 'Unknown Title',
-        artist: json['artist'] as String? ?? 'Unknown Artist',
-        album: json['album'] as String?,
+        title: json['title'] as String? ?? json['name'] as String? ?? 'Unknown Title',
+        artist: json['artist'] as String? ?? json['artistName'] as String? ?? 'Unknown Artist',
+        album: json['album'] as String? ?? json['albumName'] as String?,
         albumArtUrl: json['albumArtUrl'] as String?,
-        spotifyPreviewUrl: json['spotifyPreviewUrl'] as String?,
+        spotifyPreviewUrl: json['spotifyPreviewUrl'] as String? ?? json['previewUrl'] as String?,
         spotifyUrl: json['spotifyUrl'] as String?,
         durationMs: (json['durationMs'] as num?)?.toInt(),
         spotifyTrackId: json['spotifyTrackId'] as String?,

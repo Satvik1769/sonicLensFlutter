@@ -28,12 +28,12 @@ class SpotifyTrack {
   });
 
   factory SpotifyTrack.fromJson(Map<String, dynamic> json) => SpotifyTrack(
-        spotifyId: json['spotifyId'] as String? ?? '',
-        name: json['name'] as String? ?? 'Unknown',
-        artistName: json['artistName'] as String? ?? 'Unknown Artist',
-        albumName: json['albumName'] as String?,
+        spotifyId: json['spotifyId'] as String? ?? json['spotifyTrackId'] as String? ?? '',
+        name: json['name'] as String? ?? json['title'] as String? ?? 'Unknown',
+        artistName: json['artistName'] as String? ?? json['artist'] as String? ?? 'Unknown Artist',
+        albumName: json['albumName'] as String? ?? json['album'] as String?,
         albumArtUrl: json['albumArtUrl'] as String?,
-        previewUrl: json['previewUrl'] as String?,
+        previewUrl: json['previewUrl'] as String? ?? json['spotifyPreviewUrl'] as String?,
         durationMs: (json['durationMs'] as num?)?.toInt(),
         spotifyUrl: json['spotifyUrl'] as String?,
         explicit: json['explicit'] as bool?,
