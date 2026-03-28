@@ -24,6 +24,9 @@ dependencies:
   path_provider: ^2.1.4
   shared_preferences: ^2.3.3
 
+  # Microphone recording (iOS mic capture + Android fallback)
+  record: ^6.0.0
+
   # Permissions
   permission_handler: ^11.3.1
 

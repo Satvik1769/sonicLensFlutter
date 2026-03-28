@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/app_provider.dart';
+import '../../core/services/audio_capture_service.dart';
 import '../../core/theme/app_theme.dart';
+
+// ignore_for_file: use_build_context_synchronously
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -53,6 +56,9 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               _buildHeader(provider),
               Expanded(child: _buildRadar(provider)),
+              // Android only: backend switcher (Shizuku vs mic)
+              if (AudioCaptureService.isSupported)
+                _BackendSwitcher(provider: provider),
               _buildStatusArea(provider),
               const SizedBox(height: 32),
             ],
@@ -77,7 +83,11 @@ class _HomeScreenState extends State<HomeScreen>
               letterSpacing: 1,
             ),
           ),
-          _ShizukuBadge(available: provider.shizukuAvailable),
+          // Android: Shizuku badge. iOS: mic badge.
+          if (AudioCaptureService.isSupported)
+            _ShizukuBadge(available: provider.shizukuAvailable)
+          else
+            const _MicBadge(),
         ],
       ),
     );
@@ -170,12 +180,13 @@ class _HomeScreenState extends State<HomeScreen>
       return _RecognitionCard(song: latest);
     }
 
+    final isMic = provider.backend == CaptureBackend.microphone;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Text(
         provider.captureState == CaptureState.listening
-            ? 'Listening to system audio...'
-            : 'Tap to start listening',
+            ? (isMic ? 'Listening via microphone...' : 'Listening to system audio...')
+            : (isMic ? 'Tap and hold phone near speaker' : 'Tap to start listening'),
         textAlign: TextAlign.center,
         style: const TextStyle(color: Colors.white54, fontSize: 16),
       ),
@@ -315,6 +326,135 @@ class _PlaceholderArt extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: const Icon(Icons.music_note, color: Colors.white24),
+    );
+  }
+}
+
+/// Android-only row to switch between Shizuku (system audio) and microphone.
+class _BackendSwitcher extends StatelessWidget {
+  final AppProvider provider;
+  const _BackendSwitcher({required this.provider});
+
+  @override
+  Widget build(BuildContext context) {
+    final active = provider.backend;
+    final canSwitch = provider.captureState != CaptureState.listening;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _Chip(
+            label: 'System Audio',
+            icon: Icons.speaker,
+            selected: active == CaptureBackend.shizuku,
+            enabled: canSwitch && provider.shizukuAvailable,
+            onTap: () => provider.switchBackend(CaptureBackend.shizuku),
+          ),
+          const SizedBox(width: 8),
+          _Chip(
+            label: 'Microphone',
+            icon: Icons.mic,
+            selected: active == CaptureBackend.microphone,
+            enabled: canSwitch,
+            onTap: () => provider.switchBackend(CaptureBackend.microphone),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _Chip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.radarInner.withValues(alpha: 0.2)
+              : const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? AppTheme.radarInner : Colors.white12,
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 14,
+                color: selected
+                    ? AppTheme.radarGlow
+                    : enabled
+                        ? Colors.white54
+                        : Colors.white24),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: selected
+                    ? AppTheme.radarGlow
+                    : enabled
+                        ? Colors.white54
+                        : Colors.white24,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MicBadge extends StatelessWidget {
+  const _MicBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.4)),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.mic, size: 12, color: Colors.lightBlueAccent),
+          SizedBox(width: 4),
+          Text(
+            'Microphone',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Colors.lightBlueAccent,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

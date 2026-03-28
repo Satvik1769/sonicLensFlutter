@@ -3,7 +3,6 @@ import '../core/theme/app_theme.dart';
 import '../features/home/home_screen.dart';
 import '../features/history/history_screen.dart';
 import '../features/player/player_screen.dart';
-import '../features/settings/settings_screen.dart';
 
 class SonicLensApp extends StatelessWidget {
   const SonicLensApp({super.key});
@@ -33,7 +32,6 @@ class _RootNavState extends State<_RootNav> {
     HomeScreen(),
     HistoryScreen(),
     PlayerScreen(),
-    SettingsScreen(),
   ];
 
   @override
@@ -75,10 +73,6 @@ class _BottomBar extends StatelessWidget {
           BottomNavigationBarItem(
             icon: Icon(Icons.headphones_rounded),
             label: 'Player',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings_outlined),
-            label: 'Settings',
           ),
         ],
       ),

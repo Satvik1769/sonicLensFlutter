@@ -1,9 +1,10 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../constants/app_constants.dart';
 
 /// Wraps the native MethodChannel + EventChannel for audio capture.
-/// Communicates with MainActivity.kt → AudioForegroundService → Shizuku UserService.
+/// Android-only feature — all methods return safe no-op defaults on other platforms.
 class AudioCaptureService {
   static final _method = MethodChannel(AppConstants.methodChannel);
   static final _events = EventChannel(AppConstants.eventChannel);
@@ -20,8 +21,13 @@ class AudioCaptureService {
   bool _isListening = false;
   bool get isListening => _isListening;
 
+  /// Whether audio capture is supported on the current platform.
+  static bool get isSupported => defaultTargetPlatform == TargetPlatform.android;
+
   AudioCaptureService() {
-    _subscription = _events.receiveBroadcastStream().listen(_onEvent);
+    if (isSupported) {
+      _subscription = _events.receiveBroadcastStream().listen(_onEvent);
+    }
   }
 
   void _onEvent(dynamic event) {
@@ -41,32 +47,53 @@ class AudioCaptureService {
   }
 
   Future<bool> isShizukuAvailable() async {
+    if (!isSupported) return false;
     try {
       return await _method.invokeMethod<bool>('isShizukuAvailable') ?? false;
     } on PlatformException {
+      return false;
+    } on MissingPluginException {
       return false;
     }
   }
 
   Future<bool> isShizukuPermissionGranted() async {
+    if (!isSupported) return false;
     try {
       return await _method.invokeMethod<bool>('isShizukuPermissionGranted') ?? false;
     } on PlatformException {
+      return false;
+    } on MissingPluginException {
       return false;
     }
   }
 
   Future<void> requestShizukuPermission() async {
-    await _method.invokeMethod('requestShizukuPermission');
+    if (!isSupported) return;
+    try {
+      await _method.invokeMethod('requestShizukuPermission');
+    } on MissingPluginException {
+      // no-op on unsupported platforms
+    }
   }
 
   Future<void> startCapture() async {
-    await _method.invokeMethod('startCapture');
-    _isListening = true;
+    if (!isSupported) return;
+    try {
+      await _method.invokeMethod('startCapture');
+      _isListening = true;
+    } on MissingPluginException {
+      // no-op
+    }
   }
 
   Future<void> stopCapture() async {
-    await _method.invokeMethod('stopCapture');
+    if (!isSupported) return;
+    try {
+      await _method.invokeMethod('stopCapture');
+    } on MissingPluginException {
+      // no-op
+    }
     _isListening = false;
   }
 

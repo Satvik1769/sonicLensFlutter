@@ -8,8 +8,7 @@ class AppConstants {
   static const prefRecognizePath = 'recognize_path';
   static const prefSongsPath = 'songs_path';
 
-  // Defaults — user configures their own server in Settings
-  static const defaultServerUrl = 'http://192.168.1.100:8000';
+  static const defaultServerUrl = 'http://136.115.126.210:8082';
   static const defaultRecognizePath = '/recognize';
   static const defaultSongsPath = '/songs';
 

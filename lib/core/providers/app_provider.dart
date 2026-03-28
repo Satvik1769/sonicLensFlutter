@@ -4,15 +4,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/app_constants.dart';
 import '../models/song.dart';
 import '../services/audio_capture_service.dart';
+import '../services/mic_capture_service.dart';
 import '../services/upload_service.dart';
 
 enum CaptureState { idle, starting, listening, error }
 
+/// Which capture backend is currently active.
+enum CaptureBackend { shizuku, microphone }
+
 class AppProvider extends ChangeNotifier {
-  final AudioCaptureService _captureService;
+  final AudioCaptureService _shizukuService;
+  final MicCaptureService _micService = MicCaptureService();
 
   CaptureState _captureState = CaptureState.idle;
   CaptureState get captureState => _captureState;
+
+  CaptureBackend _backend = CaptureBackend.shizuku;
+  /// Which backend is active (or will be used on next start).
+  CaptureBackend get backend => _backend;
 
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
@@ -26,11 +35,9 @@ class AppProvider extends ChangeNotifier {
   List<Song> _songs = [];
   List<Song> get songs => List.unmodifiable(_songs);
 
-  // Playback state
   Song? _currentSong;
   Song? get currentSong => _currentSong;
 
-  // Server settings
   String _serverUrl = AppConstants.defaultServerUrl;
   String _recognizePath = AppConstants.defaultRecognizePath;
   String _songsPath = AppConstants.defaultSongsPath;
@@ -47,20 +54,34 @@ class AppProvider extends ChangeNotifier {
   bool _shizukuAvailable = false;
   bool get shizukuAvailable => _shizukuAvailable;
 
-  AppProvider(this._captureService) {
+  AppProvider(this._shizukuService) {
     _init();
   }
 
   Future<void> _init() async {
     await _loadSettings();
-    _shizukuAvailable = await _captureService.isShizukuAvailable();
     _uploadService = UploadService(
       serverUrl: _serverUrl,
       recognizePath: _recognizePath,
     );
 
-    _chunkSub = _captureService.chunkStream.listen(_onChunk);
-    _errorSub = _captureService.errorStream.listen(_onError);
+    if (AudioCaptureService.isSupported) {
+      _shizukuAvailable = await _shizukuService.isShizukuAvailable();
+      // Default to Shizuku on Android if available, else mic
+      _backend = _shizukuAvailable
+          ? CaptureBackend.shizuku
+          : CaptureBackend.microphone;
+
+      _chunkSub = _shizukuService.chunkStream.listen(_onChunk);
+      _errorSub = _shizukuService.errorStream.listen(_onError);
+    } else {
+      // iOS — always use microphone
+      _backend = CaptureBackend.microphone;
+    }
+
+    // Wire mic service streams regardless of platform
+    _chunkSub ??= _micService.chunkStream.listen(_onChunk);
+    _errorSub ??= _micService.errorStream.listen(_onError);
 
     notifyListeners();
   }
@@ -89,6 +110,13 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// On Android, lets the user switch between Shizuku and mic backends.
+  void switchBackend(CaptureBackend b) {
+    if (_captureState == CaptureState.listening) return; // can't switch while running
+    _backend = b;
+    notifyListeners();
+  }
+
   Future<void> toggleCapture() async {
     if (_captureState == CaptureState.listening) {
       await stopCapture();
@@ -103,34 +131,51 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Check Shizuku is available and permitted
-      if (!await _captureService.isShizukuAvailable()) {
-        _setError('Shizuku is not running. Please install and start the Shizuku app.');
-        return;
+      if (_backend == CaptureBackend.microphone) {
+        await _startMicCapture();
+      } else {
+        await _startShizukuCapture();
       }
-      if (!await _captureService.isShizukuPermissionGranted()) {
-        await _captureService.requestShizukuPermission();
-        // Permission result comes via stream — show a message
-        _setError('Please grant SonicLens permission in Shizuku, then try again.');
-        return;
-      }
-
-      await _captureService.startCapture();
-      _captureState = CaptureState.listening;
     } catch (e) {
       _setError(e.toString());
     }
     notifyListeners();
   }
 
+  Future<void> _startMicCapture() async {
+    if (!await _micService.hasPermission()) {
+      _setError('Microphone permission denied. Please allow access in Settings.');
+      return;
+    }
+    await _micService.start();
+    _captureState = CaptureState.listening;
+  }
+
+  Future<void> _startShizukuCapture() async {
+    if (!await _shizukuService.isShizukuAvailable()) {
+      _setError('Shizuku is not running. Please install and start the Shizuku app.');
+      return;
+    }
+    if (!await _shizukuService.isShizukuPermissionGranted()) {
+      await _shizukuService.requestShizukuPermission();
+      _setError('Please grant SonicLens permission in Shizuku, then try again.');
+      return;
+    }
+    await _shizukuService.startCapture();
+    _captureState = CaptureState.listening;
+  }
+
   Future<void> stopCapture() async {
-    await _captureService.stopCapture();
+    if (_backend == CaptureBackend.microphone) {
+      await _micService.stop();
+    } else {
+      await _shizukuService.stopCapture();
+    }
     _captureState = CaptureState.idle;
     notifyListeners();
   }
 
-  Future<void> _onChunk(Uint8List wavData) async {
-    // Fire and forget recognition — don't await to avoid blocking stream
+  void _onChunk(Uint8List wavData) {
     _recognize(wavData);
   }
 
@@ -147,9 +192,7 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  void _onError(String message) {
-    _setError(message);
-  }
+  void _onError(String message) => _setError(message);
 
   void _setError(String message) {
     _errorMessage = message;
@@ -175,7 +218,8 @@ class AppProvider extends ChangeNotifier {
   void dispose() {
     _chunkSub?.cancel();
     _errorSub?.cancel();
-    _captureService.dispose();
+    _shizukuService.dispose();
+    _micService.dispose();
     super.dispose();
   }
 }
