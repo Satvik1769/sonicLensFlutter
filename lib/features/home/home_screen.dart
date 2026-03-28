@@ -1,0 +1,360 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/providers/app_provider.dart';
+import '../../core/theme/app_theme.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    );
+    _pulseAnim = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  void _syncAnimation(CaptureState state) {
+    if (state == CaptureState.listening) {
+      if (!_pulseController.isAnimating) _pulseController.repeat(reverse: true);
+    } else {
+      _pulseController.stop();
+      _pulseController.animateTo(0.85, duration: const Duration(milliseconds: 300));
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AppProvider>(builder: (context, provider, _) {
+      _syncAnimation(provider.captureState);
+
+      return Scaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildHeader(provider),
+              Expanded(child: _buildRadar(provider)),
+              _buildStatusArea(provider),
+              const SizedBox(height: 32),
+            ],
+          ),
+        ),
+      );
+    });
+  }
+
+  Widget _buildHeader(AppProvider provider) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            'SonicLens',
+            style: TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              letterSpacing: 1,
+            ),
+          ),
+          _ShizukuBadge(available: provider.shizukuAvailable),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRadar(AppProvider provider) {
+    final isListening = provider.captureState == CaptureState.listening;
+    final isStarting = provider.captureState == CaptureState.starting;
+
+    return Center(
+      child: GestureDetector(
+        onTap: isStarting ? null : provider.toggleCapture,
+        child: AnimatedBuilder(
+          animation: _pulseAnim,
+          builder: (context, child) {
+            final scale = isListening ? _pulseAnim.value : 1.0;
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                // Outer glow ring
+                if (isListening) ...[
+                  _RadarRing(radius: 155 * scale, color: AppTheme.radarOuter),
+                  _RadarRing(radius: 125 * scale, color: AppTheme.radarMiddle),
+                ],
+                // Main button
+                Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    width: 180,
+                    height: 180,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: isListening
+                            ? [AppTheme.radarGlow, AppTheme.radarInner]
+                            : [const Color(0xFF1E293B), const Color(0xFF0F172A)],
+                      ),
+                      boxShadow: isListening
+                          ? [
+                              BoxShadow(
+                                color: AppTheme.radarInner.withValues(alpha: 0.5),
+                                blurRadius: 40,
+                                spreadRadius: 8,
+                              ),
+                            ]
+                          : [],
+                      border: Border.all(
+                        color: isListening ? AppTheme.radarGlow : Colors.white12,
+                        width: 2,
+                      ),
+                    ),
+                    child: child,
+                  ),
+                ),
+              ],
+            );
+          },
+          child: _ButtonContent(
+            state: provider.captureState,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusArea(AppProvider provider) {
+    final latest = provider.latestRecognition;
+
+    if (provider.captureState == CaptureState.error &&
+        provider.errorMessage != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.red.withValues(alpha: 0.4)),
+          ),
+          child: Text(
+            provider.errorMessage!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+          ),
+        ),
+      );
+    }
+
+    if (latest != null) {
+      return _RecognitionCard(song: latest);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Text(
+        provider.captureState == CaptureState.listening
+            ? 'Listening to system audio...'
+            : 'Tap to start listening',
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: Colors.white54, fontSize: 16),
+      ),
+    );
+  }
+}
+
+class _ButtonContent extends StatelessWidget {
+  final CaptureState state;
+  const _ButtonContent({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    if (state == CaptureState.starting) {
+      return const CircularProgressIndicator(
+        color: Colors.white,
+        strokeWidth: 2,
+      );
+    }
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          state == CaptureState.listening
+              ? Icons.graphic_eq_rounded
+              : Icons.music_note_rounded,
+          color: Colors.white,
+          size: 48,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          state == CaptureState.listening ? 'LISTENING' : 'TAP',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.85),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RadarRing extends StatelessWidget {
+  final double radius;
+  final Color color;
+  const _RadarRing({required this.radius, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: radius * 2,
+      height: radius * 2,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: color, width: 1.5),
+      ),
+    );
+  }
+}
+
+class _RecognitionCard extends StatelessWidget {
+  final dynamic song;
+  const _RecognitionCard({required this.song});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.radarInner.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            if (song.artworkUrl != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  song.artworkUrl!,
+                  width: 56,
+                  height: 56,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const _PlaceholderArt(size: 56),
+                ),
+              )
+            else
+              const _PlaceholderArt(size: 56),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    song.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    song.artist,
+                    style: const TextStyle(color: Colors.white60, fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.check_circle, color: AppTheme.radarGlow, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaceholderArt extends StatelessWidget {
+  final double size;
+  const _PlaceholderArt({required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Icon(Icons.music_note, color: Colors.white24),
+    );
+  }
+}
+
+class _ShizukuBadge extends StatelessWidget {
+  final bool available;
+  const _ShizukuBadge({required this.available});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: available
+            ? Colors.green.withValues(alpha: 0.15)
+            : Colors.orange.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: available ? Colors.green.withValues(alpha: 0.5) : Colors.orange.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            available ? Icons.check_circle : Icons.warning_amber,
+            size: 12,
+            color: available ? Colors.greenAccent : Colors.orangeAccent,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Shizuku',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: available ? Colors.greenAccent : Colors.orangeAccent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
