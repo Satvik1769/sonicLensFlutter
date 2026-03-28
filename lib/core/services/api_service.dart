@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../models/song.dart';
+import '../models/trending.dart';
 
 /// Central API service. All endpoints are built from [baseUrl].
 /// Pass [authToken] for authenticated requests.
@@ -121,6 +122,21 @@ class ApiService {
           .toList();
     } catch (_) {
       return [];
+    }
+  }
+
+  // ── Trending ──────────────────────────────────────────────────────────────
+
+  Future<TrendingResponse?> fetchTrending() async {
+    try {
+      final res = await http
+          .get(_uri('/trending'), headers: _authHeader)
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return null;
+      return TrendingResponse.fromJson(
+          jsonDecode(res.body) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
     }
   }
 

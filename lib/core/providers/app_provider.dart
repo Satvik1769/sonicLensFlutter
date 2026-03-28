@@ -6,6 +6,7 @@ import '../models/song.dart';
 import '../services/audio_capture_service.dart';
 import '../services/mic_capture_service.dart';
 import '../services/api_service.dart';
+import '../models/trending.dart';
 
 enum CaptureState { idle, starting, listening, error }
 
@@ -44,6 +45,12 @@ class AppProvider extends ChangeNotifier {
 
   bool _searching = false;
   bool get searching => _searching;
+
+  TrendingResponse? _trending;
+  TrendingResponse? get trending => _trending;
+
+  bool _loadingTrending = false;
+  bool get loadingTrending => _loadingTrending;
 
   Song? _currentSong;
   Song? get currentSong => _currentSong;
@@ -194,6 +201,14 @@ class AppProvider extends ChangeNotifier {
   }
 
   // ── Library ───────────────────────────────────────────────────────────────
+
+  Future<void> loadTrending() async {
+    _loadingTrending = true;
+    notifyListeners();
+    _trending = await _api.fetchTrending();
+    _loadingTrending = false;
+    notifyListeners();
+  }
 
   Future<void> loadSongs() async {
     _songs = await _api.fetchSongs();
