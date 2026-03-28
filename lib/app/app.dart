@@ -67,12 +67,12 @@ class _BottomBar extends StatelessWidget {
             label: 'Listen',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.history_rounded),
-            label: 'History',
-          ),
-          BottomNavigationBarItem(
             icon: Icon(Icons.headphones_rounded),
             label: 'Player',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.history_rounded),
+            label: 'History',
           ),
         ],
       ),
