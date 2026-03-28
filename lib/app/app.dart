@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../core/providers/app_provider.dart';
 import '../core/theme/app_theme.dart';
+import '../features/auth/auth_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/history/history_screen.dart';
 import '../features/player/player_screen.dart';
@@ -13,8 +16,19 @@ class SonicLensApp extends StatelessWidget {
       title: 'SonicLens',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
-      home: const _RootNav(),
+      home: const _AuthGate(),
     );
+  }
+}
+
+/// Shows [AuthScreen] until the user is logged in, then shows the main nav.
+class _AuthGate extends StatelessWidget {
+  const _AuthGate();
+
+  @override
+  Widget build(BuildContext context) {
+    final isLoggedIn = context.select<AppProvider, bool>((p) => p.isLoggedIn);
+    return isLoggedIn ? const _RootNav() : const AuthScreen();
   }
 }
 
@@ -30,8 +44,8 @@ class _RootNavState extends State<_RootNav> {
 
   static const _screens = [
     HomeScreen(),
-    HistoryScreen(),
     PlayerScreen(),
+    HistoryScreen(),
   ];
 
   @override

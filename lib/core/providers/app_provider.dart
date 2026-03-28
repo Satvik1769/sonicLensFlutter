@@ -5,54 +5,60 @@ import '../constants/app_constants.dart';
 import '../models/song.dart';
 import '../services/audio_capture_service.dart';
 import '../services/mic_capture_service.dart';
-import '../services/upload_service.dart';
+import '../services/api_service.dart';
 
 enum CaptureState { idle, starting, listening, error }
 
-/// Which capture backend is currently active.
 enum CaptureBackend { shizuku, microphone }
 
 class AppProvider extends ChangeNotifier {
   final AudioCaptureService _shizukuService;
   final MicCaptureService _micService = MicCaptureService();
 
+  // ── Capture state ─────────────────────────────────────────────────────────
   CaptureState _captureState = CaptureState.idle;
   CaptureState get captureState => _captureState;
 
   CaptureBackend _backend = CaptureBackend.shizuku;
-  /// Which backend is active (or will be used on next start).
   CaptureBackend get backend => _backend;
 
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
 
+  bool _shizukuAvailable = false;
+  bool get shizukuAvailable => _shizukuAvailable;
+
+  // ── Recognition history ───────────────────────────────────────────────────
   final List<RecognizedSong> _history = [];
   List<RecognizedSong> get history => List.unmodifiable(_history);
 
   RecognizedSong? _latestRecognition;
   RecognizedSong? get latestRecognition => _latestRecognition;
 
+  // ── Library / search ──────────────────────────────────────────────────────
   List<Song> _songs = [];
   List<Song> get songs => List.unmodifiable(_songs);
+
+  List<Song> _searchResults = [];
+  List<Song> get searchResults => List.unmodifiable(_searchResults);
+
+  bool _searching = false;
+  bool get searching => _searching;
 
   Song? _currentSong;
   Song? get currentSong => _currentSong;
 
-  String _serverUrl = AppConstants.defaultServerUrl;
-  String _recognizePath = AppConstants.defaultRecognizePath;
-  String _songsPath = AppConstants.defaultSongsPath;
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  String? _authToken;
+  String? get authToken => _authToken;
+  bool get isLoggedIn => _authToken != null && _authToken!.isNotEmpty;
 
-  String get serverUrl => _serverUrl;
-  String get recognizePath => _recognizePath;
-  String get songsPath => _songsPath;
-
-  UploadService? _uploadService;
+  // ── API ───────────────────────────────────────────────────────────────────
+  ApiService get _api =>
+      ApiService(baseUrl: AppConstants.baseUrl, authToken: _authToken);
 
   StreamSubscription? _chunkSub;
   StreamSubscription? _errorSub;
-
-  bool _shizukuAvailable = false;
-  bool get shizukuAvailable => _shizukuAvailable;
 
   AppProvider(this._shizukuService) {
     _init();
@@ -60,26 +66,18 @@ class AppProvider extends ChangeNotifier {
 
   Future<void> _init() async {
     await _loadSettings();
-    _uploadService = UploadService(
-      serverUrl: _serverUrl,
-      recognizePath: _recognizePath,
-    );
 
     if (AudioCaptureService.isSupported) {
       _shizukuAvailable = await _shizukuService.isShizukuAvailable();
-      // Default to Shizuku on Android if available, else mic
       _backend = _shizukuAvailable
           ? CaptureBackend.shizuku
           : CaptureBackend.microphone;
-
       _chunkSub = _shizukuService.chunkStream.listen(_onChunk);
       _errorSub = _shizukuService.errorStream.listen(_onError);
     } else {
-      // iOS — always use microphone
       _backend = CaptureBackend.microphone;
     }
 
-    // Wire mic service streams regardless of platform
     _chunkSub ??= _micService.chunkStream.listen(_onChunk);
     _errorSub ??= _micService.errorStream.listen(_onError);
 
@@ -88,31 +86,36 @@ class AppProvider extends ChangeNotifier {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    _serverUrl = prefs.getString(AppConstants.prefServerUrl) ?? AppConstants.defaultServerUrl;
-    _recognizePath = prefs.getString(AppConstants.prefRecognizePath) ?? AppConstants.defaultRecognizePath;
-    _songsPath = prefs.getString(AppConstants.prefSongsPath) ?? AppConstants.defaultSongsPath;
+    _authToken = prefs.getString(AppConstants.prefAuthToken);
   }
 
-  Future<void> saveSettings({
-    required String serverUrl,
-    required String recognizePath,
-    required String songsPath,
-  }) async {
-    _serverUrl = serverUrl;
-    _recognizePath = recognizePath;
-    _songsPath = songsPath;
-    _uploadService = UploadService(serverUrl: serverUrl, recognizePath: recognizePath);
+  // ── Auth ──────────────────────────────────────────────────────────────────
 
+  Future<String?> login(String email, String password) async {
+    final token = await _api.login(email, password);
+    if (token != null) {
+      _authToken = token;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(AppConstants.prefAuthToken, token);
+      notifyListeners();
+    }
+    return token;
+  }
+
+  Future<bool> register(String username, String password) =>
+      _api.register(username, password);
+
+  Future<void> logout() async {
+    _authToken = null;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(AppConstants.prefServerUrl, serverUrl);
-    await prefs.setString(AppConstants.prefRecognizePath, recognizePath);
-    await prefs.setString(AppConstants.prefSongsPath, songsPath);
+    await prefs.remove(AppConstants.prefAuthToken);
     notifyListeners();
   }
 
-  /// On Android, lets the user switch between Shizuku and mic backends.
+  // ── Capture ───────────────────────────────────────────────────────────────
+
   void switchBackend(CaptureBackend b) {
-    if (_captureState == CaptureState.listening) return; // can't switch while running
+    if (_captureState == CaptureState.listening) return;
     _backend = b;
     notifyListeners();
   }
@@ -175,13 +178,11 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _onChunk(Uint8List wavData) {
-    _recognize(wavData);
-  }
+  void _onChunk(Uint8List wavData) => _recognize(wavData);
 
   Future<void> _recognize(Uint8List wavData) async {
     try {
-      final song = await _uploadService?.recognizeChunk(wavData);
+      final song = await _api.recognizeChunk(wavData);
       if (song != null) {
         _latestRecognition = song;
         _history.insert(0, song);
@@ -192,25 +193,46 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  void _onError(String message) => _setError(message);
+  // ── Library ───────────────────────────────────────────────────────────────
 
-  void _setError(String message) {
-    _errorMessage = message;
-    _captureState = CaptureState.error;
+  Future<void> loadSongs() async {
+    _songs = await _api.fetchSongs();
     notifyListeners();
   }
 
-  Future<void> loadSongs() async {
-    try {
-      _songs = await (_uploadService?.fetchSongs(_songsPath) ?? Future.value([]));
+  Future<void> searchSongs(String query) async {
+    _searching = true;
+    notifyListeners();
+    _searchResults = await _api.searchSongs(query);
+    _searching = false;
+    notifyListeners();
+  }
+
+  void clearSearch() {
+    _searchResults = [];
+    notifyListeners();
+  }
+
+  Future<void> loadHistory() async {
+    final serverHistory = await _api.fetchHistory();
+    if (serverHistory.isNotEmpty) {
+      _history
+        ..clear()
+        ..addAll(serverHistory);
       notifyListeners();
-    } catch (e) {
-      debugPrint('Error loading songs: $e');
     }
   }
 
   void setCurrentSong(Song? song) {
     _currentSong = song;
+    notifyListeners();
+  }
+
+  void _onError(String message) => _setError(message);
+
+  void _setError(String message) {
+    _errorMessage = message;
+    _captureState = CaptureState.error;
     notifyListeners();
   }
 
