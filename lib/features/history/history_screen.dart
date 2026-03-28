@@ -100,7 +100,6 @@ class _HistoryTile extends StatelessWidget {
                 style: const TextStyle(color: Colors.white38, fontSize: 11),
               ),
               const SizedBox(width: 8),
-              _ConfidenceBadge(confidence: confidencePct),
             ],
           ),
         ],

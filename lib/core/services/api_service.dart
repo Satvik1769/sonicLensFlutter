@@ -109,7 +109,7 @@ class ApiService {
   Future<List<RecognizedSong>> fetchHistory() async {
     try {
       final res = await http
-          .get(_uri('/recognition-history'), headers: _authHeader)
+          .get(_uri('/history'), headers: _authHeader)
           .timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return [];
       final json = jsonDecode(res.body);
