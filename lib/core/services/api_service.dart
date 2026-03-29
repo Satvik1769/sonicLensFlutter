@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../models/song.dart';
 import '../models/trending.dart';
 
@@ -61,7 +62,8 @@ class ApiService {
       ..files.add(http.MultipartFile.fromBytes(
         'file',
         wavBytes,
-        filename: 'capture_${DateTime.now().millisecondsSinceEpoch}.wav',
+        filename: 'capture_${DateTime.now().millisecondsSinceEpoch}.m4a',
+        contentType: MediaType('audio', 'mp4'),
       ));
 
     final streamed =

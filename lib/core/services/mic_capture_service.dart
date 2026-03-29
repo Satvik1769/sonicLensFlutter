@@ -46,11 +46,11 @@ class MicCaptureService {
       try {
         final dir = await getTemporaryDirectory();
         final path =
-            '${dir.path}/sonic_chunk_${DateTime.now().millisecondsSinceEpoch}.wav';
+            '${dir.path}/sonic_chunk_${DateTime.now().millisecondsSinceEpoch}.m4a';
 
         await _recorder.start(
           const RecordConfig(
-            encoder: AudioEncoder.wav,
+            encoder: AudioEncoder.aacLc,
             sampleRate: 44100,
             numChannels: 1,
             bitRate: 128000,
