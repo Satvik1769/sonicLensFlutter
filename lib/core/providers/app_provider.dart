@@ -6,6 +6,7 @@ import '../models/song.dart';
 import '../services/audio_capture_service.dart';
 import '../services/mic_capture_service.dart';
 import '../services/api_service.dart';
+import '../services/spotify_playback_service.dart';
 import '../models/trending.dart';
 
 enum CaptureState { idle, starting, listening, error }
@@ -54,6 +55,12 @@ class AppProvider extends ChangeNotifier {
 
   Song? _currentSong;
   Song? get currentSong => _currentSong;
+
+  // ── Spotify ───────────────────────────────────────────────────────────────
+  final _spotifyService = SpotifyPlaybackService();
+  SpotifyPlaybackService get spotifyService => _spotifyService;
+  bool get spotifyConnected => _spotifyService.isConnected;
+  SpotifyPlaybackState get spotifyState => _spotifyService.state;
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   String? _authToken;
@@ -241,6 +248,29 @@ class AppProvider extends ChangeNotifier {
   void setCurrentSong(Song? song) {
     _currentSong = song;
     notifyListeners();
+  }
+
+  // ── Spotify playback ──────────────────────────────────────────────────────
+
+  /// Connects to the Spotify app via SDK. Returns true if successful.
+  Future<bool> connectSpotify() async {
+    final ok = await _spotifyService.connect(
+      AppConstants.spotifyClientId,
+      AppConstants.spotifyRedirectUrl,
+    );
+    notifyListeners();
+    return ok;
+  }
+
+  /// Tries to play [song] via Spotify SDK.
+  /// Returns true if SDK playback started; false means caller should fall back.
+  Future<bool> playViaSpotifySDK(Song song) async {
+    if (song.spotifyTrackId == null || song.spotifyTrackId!.isEmpty) return false;
+    if (!_spotifyService.isConnected) {
+      final ok = await connectSpotify();
+      if (!ok) return false;
+    }
+    return _spotifyService.playTrack(song.spotifyTrackId!);
   }
 
   void _onError(String message) => _setError(message);

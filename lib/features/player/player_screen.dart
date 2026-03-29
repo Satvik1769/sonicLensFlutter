@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
+import 'package:spotify_sdk/models/player_state.dart' as spdk;
 import '../../core/models/song.dart';
 import '../../core/models/trending.dart';
 import '../../core/providers/app_provider.dart';
+import '../../core/services/spotify_playback_service.dart';
 import '../../core/theme/app_theme.dart';
+
+enum _PlayMode { sdk, preview, none }
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
@@ -15,11 +19,14 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen>
     with SingleTickerProviderStateMixin {
-  final _player = AudioPlayer();
+  // Preview player (30-second clips)
+  final _previewPlayer = AudioPlayer();
   Song? _loadedSong;
-  bool _loading = false;
-  late TabController _tabController;
+  bool _previewLoading = false;
 
+  _PlayMode _playMode = _PlayMode.none;
+
+  late TabController _tabController;
   bool _searchActive = false;
   final _searchCtrl = TextEditingController();
 
@@ -34,11 +41,71 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   void dispose() {
-    _player.dispose();
+    _previewPlayer.dispose();
     _tabController.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
+
+  // ── Playback ──────────────────────────────────────────────────────────────
+
+  /// Main entry point when user taps a track.
+  Future<void> _onTrackTap(Song song, AppProvider provider) async {
+    // Show the player immediately so UI doesn't feel unresponsive
+    provider.setCurrentSong(song);
+
+    final hasSpotifyId =
+        song.spotifyTrackId != null && song.spotifyTrackId!.isNotEmpty;
+
+    if (hasSpotifyId) {
+      if (mounted) setState(() => _playMode = _PlayMode.sdk);
+      final ok = await provider.playViaSpotifySDK(song);
+      if (ok) return;
+      // SDK failed (Spotify not installed or auth failed)
+    }
+
+    // Try 30-second preview URL (in-app playback)
+    if (song.streamUrl != null) {
+      if (mounted) setState(() => _playMode = _PlayMode.preview);
+      await _loadPreview(song);
+      return;
+    }
+
+    // Nothing available in-app → open in Spotify (app or web)
+    await SpotifyPlaybackService.openInSpotify(
+      type: 'track',
+      spotifyId: song.spotifyTrackId,
+      webUrl: song.spotifyUrl,
+    );
+    if (mounted) setState(() => _playMode = _PlayMode.none);
+  }
+
+  Future<void> _loadPreview(Song song) async {
+    if (_loadedSong?.id == song.id) return;
+    setState(() => _previewLoading = true);
+    try {
+      await _previewPlayer.setUrl(song.streamUrl!);
+      _loadedSong = song;
+      await _previewPlayer.play();
+    } catch (e) {
+      debugPrint('Preview player error: $e');
+    } finally {
+      if (mounted) setState(() => _previewLoading = false);
+    }
+  }
+
+  void _stopAndClear(AppProvider provider) {
+    if (_playMode == _PlayMode.preview) {
+      _previewPlayer.stop();
+      _loadedSong = null;
+    } else if (_playMode == _PlayMode.sdk) {
+      provider.spotifyService.pause();
+    }
+    setState(() => _playMode = _PlayMode.none);
+    provider.setCurrentSong(null);
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────────
 
   void _openSearch() => setState(() => _searchActive = true);
 
@@ -50,29 +117,19 @@ class _PlayerScreenState extends State<PlayerScreen>
     context.read<AppProvider>().clearSearch();
   }
 
-  Future<void> _loadSong(Song song) async {
-    if (_loadedSong?.id == song.id) return;
-    setState(() => _loading = true);
-    try {
-      await _player.setUrl(song.streamUrl!);
-      _loadedSong = song;
-      await _player.play();
-    } catch (e) {
-      debugPrint('Player error: $e');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Consumer<AppProvider>(builder: (context, provider, _) {
       final currentSong = provider.currentSong;
 
-      if (currentSong?.streamUrl != null &&
-          currentSong?.id != _loadedSong?.id) {
+      if (currentSong != null &&
+          _playMode == _PlayMode.preview &&
+          currentSong.streamUrl != null &&
+          currentSong.id != _loadedSong?.id) {
         WidgetsBinding.instance
-            .addPostFrameCallback((_) => _loadSong(currentSong!));
+            .addPostFrameCallback((_) => _loadPreview(currentSong));
       }
 
       if (currentSong != null) {
@@ -91,12 +148,20 @@ class _PlayerScreenState extends State<PlayerScreen>
         title: const Text('Now Playing'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            _player.stop();
-            _loadedSong = null;
-            provider.setCurrentSong(null);
-          },
+          onPressed: () => _stopAndClear(provider),
         ),
+        actions: [
+          if (song.spotifyUrl != null)
+            IconButton(
+              icon: const _SpotifyIcon(),
+              tooltip: 'Open in Spotify',
+              onPressed: () => SpotifyPlaybackService.openInSpotify(
+                type: 'track',
+                spotifyId: song.spotifyTrackId,
+                webUrl: song.spotifyUrl,
+              ),
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -152,45 +217,135 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ],
                   ),
                 ),
-                if (song.explicit == true)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 5, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                    child: const Text('E',
-                        style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold)),
-                  ),
+                if (song.explicit == true) _buildExplicitBadge(),
               ],
             ),
           ),
           const SizedBox(height: 16),
-          _buildProgressBar(song),
-          _buildControls(),
+          if (_playMode == _PlayMode.sdk && provider.spotifyConnected)
+            _buildSdkControls(provider)
+          else if (_playMode == _PlayMode.preview)
+            ...[_buildPreviewProgressBar(song), _buildPreviewControls()]
+          else if (_playMode == _PlayMode.sdk && !provider.spotifyConnected)
+            // SDK mode but Spotify not installed — show loading until fallback resolves
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: CircularProgressIndicator(),
+            )
+          else
+            _buildOpenInSpotifyPrompt(song),
           const SizedBox(height: 32),
         ],
       ),
     );
   }
 
-  Widget _buildProgressBar(Song song) {
+  // ── SDK controls ──────────────────────────────────────────────────────────
+
+  Widget _buildSdkControls(AppProvider provider) {
+    return StreamBuilder<spdk.PlayerState>(
+      stream: provider.spotifyService.playerStateStream,
+      builder: (context, snapshot) {
+        final state = snapshot.data;
+        final paused = state?.isPaused ?? true;
+        final posMs = state?.playbackPosition ?? 0;
+        final durMs = state?.track?.duration ?? provider.currentSong?.durationMs ?? 0;
+        final progress = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            children: [
+              SliderTheme(
+                data: SliderThemeData(
+                  trackHeight: 3,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                  activeTrackColor: AppTheme.radarGlow,
+                  inactiveTrackColor: Colors.white12,
+                  thumbColor: Colors.white,
+                ),
+                child: Slider(
+                  value: progress.toDouble(),
+                  onChanged: (v) => provider.spotifyService
+                      .seekTo((v * durMs).round()),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(_fmtMs(posMs),
+                        style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                    Text(_fmtMs(durMs),
+                        style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.skip_previous_rounded,
+                        color: Colors.white, size: 40),
+                    onPressed: () {},
+                  ),
+                  GestureDetector(
+                    onTap: paused
+                        ? provider.spotifyService.resume
+                        : provider.spotifyService.pause,
+                    child: Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppTheme.radarInner,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.radarInner.withValues(alpha: 0.4),
+                            blurRadius: 20,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        paused
+                            ? Icons.play_arrow_rounded
+                            : Icons.pause_rounded,
+                        color: Colors.white,
+                        size: 36,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.skip_next_rounded,
+                        color: Colors.white, size: 40),
+                    onPressed: () {},
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Preview controls ──────────────────────────────────────────────────────
+
+  Widget _buildPreviewProgressBar(Song song) {
     return StreamBuilder<Duration>(
-      stream: _player.positionStream,
+      stream: _previewPlayer.positionStream,
       builder: (context, snapshot) {
         final position = snapshot.data ?? Duration.zero;
         final duration = song.durationMs != null
             ? Duration(milliseconds: song.durationMs!)
-            : (_player.duration ?? Duration.zero);
+            : (_previewPlayer.duration ?? Duration.zero);
         final progress = duration.inMilliseconds > 0
             ? (position.inMilliseconds / duration.inMilliseconds)
                 .clamp(0.0, 1.0)
             : 0.0;
-
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
           child: Column(
@@ -205,8 +360,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                   thumbColor: Colors.white,
                 ),
                 child: Slider(
-                  value: progress,
-                  onChanged: (v) => _player.seek(Duration(
+                  value: progress.toDouble(),
+                  onChanged: (v) => _previewPlayer.seek(Duration(
                       milliseconds: (v * duration.inMilliseconds).round())),
                 ),
               ),
@@ -218,9 +373,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                     Text(_fmt(position),
                         style: const TextStyle(
                             color: Colors.white54, fontSize: 12)),
-                    Text(_fmt(duration),
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 12)),
+                    Row(
+                      children: [
+                        const Icon(Icons.preview_rounded,
+                            size: 11, color: Colors.white24),
+                        const SizedBox(width: 3),
+                        Text(_fmt(duration),
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 12)),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -231,7 +393,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  Widget _buildControls() {
+  Widget _buildPreviewControls() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(32, 8, 32, 0),
       child: Row(
@@ -243,11 +405,11 @@ class _PlayerScreenState extends State<PlayerScreen>
             onPressed: () {},
           ),
           StreamBuilder<PlayerState>(
-            stream: _player.playerStateStream,
+            stream: _previewPlayer.playerStateStream,
             builder: (context, snapshot) {
               final playing = snapshot.data?.playing ?? false;
               return GestureDetector(
-                onTap: playing ? _player.pause : _player.play,
+                onTap: playing ? _previewPlayer.pause : _previewPlayer.play,
                 child: Container(
                   width: 64,
                   height: 64,
@@ -262,7 +424,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                       ),
                     ],
                   ),
-                  child: _loading
+                  child: _previewLoading
                       ? const Padding(
                           padding: EdgeInsets.all(18),
                           child: CircularProgressIndicator(
@@ -289,7 +451,41 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  // ── Trending ──────────────────────────────────────────────────────────────
+  Widget _buildOpenInSpotifyPrompt(Song song) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
+      child: FilledButton.icon(
+        icon: const _SpotifyIcon(size: 18, color: Colors.white),
+        label: const Text('Open in Spotify'),
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFF1DB954),
+          minimumSize: const Size(double.infinity, 48),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+        ),
+        onPressed: () => SpotifyPlaybackService.openInSpotify(
+          type: 'track',
+          spotifyId: song.spotifyTrackId,
+          webUrl: song.spotifyUrl,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExplicitBadge() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.white24,
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: const Text('E',
+            style: TextStyle(
+                color: Colors.white70,
+                fontSize: 11,
+                fontWeight: FontWeight.bold)),
+      );
+
+  // ── Trending scaffold ─────────────────────────────────────────────────────
 
   Widget _buildTrendingScaffold(AppProvider provider) {
     return Scaffold(
@@ -361,16 +557,44 @@ class _PlayerScreenState extends State<PlayerScreen>
                       controller: _tabController,
                       children: [
                         _TracksTab(
-                            tracks: provider.trending!.trendingTracks,
-                            onPlay: (t) =>
-                                provider.setCurrentSong(t.toSong())),
+                          tracks: provider.trending!.trendingTracks,
+                          onPlay: (t) => _onTrackTap(t.toSong(), provider),
+                        ),
                         _PlaylistsTab(
-                            playlists: provider.trending!.trendingPlaylists),
-                        _AlbumsTab(albums: provider.trending!.newReleases),
+                          playlists: provider.trending!.trendingPlaylists,
+                          onTap: (p) =>
+                              _showPlaylistDetail(context, p),
+                        ),
+                        _AlbumsTab(
+                          albums: provider.trending!.newReleases,
+                          onTap: (a) => _showAlbumDetail(context, a),
+                        ),
                       ],
                     ),
     );
   }
+
+  Widget _buildEmptyTrending(AppProvider provider) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.trending_up, size: 64, color: Colors.white12),
+          const SizedBox(height: 16),
+          const Text('Could not load trending',
+              style: TextStyle(color: Colors.white38, fontSize: 16)),
+          const SizedBox(height: 12),
+          TextButton.icon(
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Try again'),
+            onPressed: provider.loadTrending,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Search body ───────────────────────────────────────────────────────────
 
   Widget _buildSearchBody(AppProvider provider) {
     if (provider.searching) {
@@ -435,41 +659,41 @@ class _PlayerScreenState extends State<PlayerScreen>
                         color: Colors.white38, fontSize: 12)),
             ],
           ),
-          onTap: song.streamUrl != null
-              ? () {
-                  provider.setCurrentSong(song);
-                  _closeSearch();
-                }
-              : null,
+          onTap: () {
+            _closeSearch();
+            _onTrackTap(song, provider);
+          },
         );
       },
     );
   }
 
+  // ── Detail sheets ─────────────────────────────────────────────────────────
+
+  void _showPlaylistDetail(BuildContext context, SpotifyPlaylist playlist) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _PlaylistDetailSheet(playlist: playlist),
+    );
+  }
+
+  void _showAlbumDetail(BuildContext context, SpotifyAlbum album) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AlbumDetailSheet(album: album),
+    );
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
   String _fmtMs(int ms) {
     final d = Duration(milliseconds: ms);
     return '${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:'
         '${d.inSeconds.remainder(60).toString().padLeft(2, '0')}';
-  }
-
-  Widget _buildEmptyTrending(AppProvider provider) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.trending_up, size: 64, color: Colors.white12),
-          const SizedBox(height: 16),
-          const Text('Could not load trending',
-              style: TextStyle(color: Colors.white38, fontSize: 16)),
-          const SizedBox(height: 12),
-          TextButton.icon(
-            icon: const Icon(Icons.refresh, size: 16),
-            label: const Text('Try again'),
-            onPressed: provider.loadTrending,
-          ),
-        ],
-      ),
-    );
   }
 
   String _fmt(Duration d) {
@@ -525,13 +749,13 @@ class _TracksTab extends StatelessWidget {
                         color: Colors.white38, fontSize: 12)),
             ],
           ),
-          onTap: t.previewUrl != null ? () => onPlay(t) : null,
+          onTap: () => onPlay(t),
         );
       },
     );
   }
 
-  String _fmtMs(int ms) {
+  static String _fmtMs(int ms) {
     final d = Duration(milliseconds: ms);
     return '${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:'
         '${d.inSeconds.remainder(60).toString().padLeft(2, '0')}';
@@ -542,7 +766,9 @@ class _TracksTab extends StatelessWidget {
 
 class _PlaylistsTab extends StatelessWidget {
   final List<SpotifyPlaylist> playlists;
-  const _PlaylistsTab({required this.playlists});
+  final void Function(SpotifyPlaylist) onTap;
+
+  const _PlaylistsTab({required this.playlists, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -558,67 +784,72 @@ class _PlaylistsTab extends StatelessWidget {
         childAspectRatio: 0.82,
       ),
       itemCount: playlists.length,
-      itemBuilder: (context, i) => _PlaylistCard(playlist: playlists[i]),
+      itemBuilder: (context, i) =>
+          _PlaylistCard(playlist: playlists[i], onTap: onTap),
     );
   }
 }
 
 class _PlaylistCard extends StatelessWidget {
   final SpotifyPlaylist playlist;
-  const _PlaylistCard({required this.playlist});
+  final void Function(SpotifyPlaylist) onTap;
+  const _PlaylistCard({required this.playlist, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(12)),
-              child: playlist.imageUrl != null
-                  ? Image.network(
-                      playlist.imageUrl!,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _gridPlaceholder(
-                          Icons.queue_music),
-                    )
-                  : _gridPlaceholder(Icons.queue_music),
+    return GestureDetector(
+      onTap: () => onTap(playlist),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(12)),
+                child: playlist.imageUrl != null
+                    ? Image.network(
+                        playlist.imageUrl!,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            _gridPlaceholder(Icons.queue_music),
+                      )
+                    : _gridPlaceholder(Icons.queue_music),
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  playlist.name,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${playlist.totalTracks} tracks'
-                  '${playlist.owner != null ? ' · ${playlist.owner}' : ''}',
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    playlist.name,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${playlist.totalTracks} tracks'
+                    '${playlist.owner != null ? ' · ${playlist.owner}' : ''}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -633,7 +864,9 @@ class _PlaylistCard extends StatelessWidget {
 
 class _AlbumsTab extends StatelessWidget {
   final List<SpotifyAlbum> albums;
-  const _AlbumsTab({required this.albums});
+  final void Function(SpotifyAlbum) onTap;
+
+  const _AlbumsTab({required this.albums, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -658,21 +891,20 @@ class _AlbumsTab extends StatelessWidget {
             children: [
               if (a.artistName != null)
                 Text(a.artistName!,
-                    style:
-                        const TextStyle(color: Colors.white60, fontSize: 12),
+                    style: const TextStyle(
+                        color: Colors.white60, fontSize: 12),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
               Row(
                 children: [
                   if (a.albumType != null)
-                    Text(
-                      a.albumType!.toUpperCase(),
-                      style: const TextStyle(
-                          color: Colors.white38, fontSize: 11),
-                    ),
+                    Text(a.albumType!.toUpperCase(),
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 11)),
                   if (a.albumType != null && a.releaseDate != null)
                     const Text(' · ',
-                        style: TextStyle(color: Colors.white24, fontSize: 11)),
+                        style: TextStyle(
+                            color: Colors.white24, fontSize: 11)),
                   if (a.releaseDate != null)
                     Text(a.releaseDate!,
                         style: const TextStyle(
@@ -682,17 +914,280 @@ class _AlbumsTab extends StatelessWidget {
             ],
           ),
           isThreeLine: true,
-          trailing: Text(
-            '${a.totalTracks} tracks',
-            style: const TextStyle(color: Colors.white38, fontSize: 11),
-          ),
+          trailing: Text('${a.totalTracks} tracks',
+              style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          onTap: () => onTap(a),
         );
       },
     );
   }
 }
 
+// ── Playlist Detail Sheet ─────────────────────────────────────────────────────
+
+class _PlaylistDetailSheet extends StatelessWidget {
+  final SpotifyPlaylist playlist;
+  const _PlaylistDetailSheet({required this.playlist});
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, controller) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF111827),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            // Drag handle
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                controller: controller,
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+                children: [
+                  // Art + info
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: playlist.imageUrl != null
+                            ? Image.network(
+                                playlist.imageUrl!,
+                                width: 120,
+                                height: 120,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) =>
+                                    _detailPlaceholder(Icons.queue_music),
+                              )
+                            : _detailPlaceholder(Icons.queue_music),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(playlist.name,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 6),
+                            if (playlist.owner != null)
+                              _metaRow(Icons.person_outline, playlist.owner!),
+                            _metaRow(Icons.music_note,
+                                '${playlist.totalTracks} tracks'),
+                            if (playlist.description != null &&
+                                playlist.description!.isNotEmpty)
+                              _metaRow(Icons.info_outline,
+                                  playlist.description!),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                  // Open in Spotify
+                  _SpotifyButton(
+                    label: 'Open in Spotify',
+                    onPressed: () => SpotifyPlaybackService.openInSpotify(
+                      type: 'playlist',
+                      spotifyId: playlist.id,
+                      webUrl: playlist.spotifyUrl,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailPlaceholder(IconData icon) => Container(
+        width: 120,
+        height: 120,
+        color: const Color(0xFF1E293B),
+        child: Center(child: Icon(icon, color: Colors.white24, size: 48)),
+      );
+
+  Widget _metaRow(IconData icon, String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 14, color: Colors.white38),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(text,
+                  style: const TextStyle(color: Colors.white60, fontSize: 13)),
+            ),
+          ],
+        ),
+      );
+}
+
+// ── Album Detail Sheet ────────────────────────────────────────────────────────
+
+class _AlbumDetailSheet extends StatelessWidget {
+  final SpotifyAlbum album;
+  const _AlbumDetailSheet({required this.album});
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, controller) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF111827),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                controller: controller,
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: album.imageUrl != null
+                            ? Image.network(
+                                album.imageUrl!,
+                                width: 120,
+                                height: 120,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) =>
+                                    _detailPlaceholder(Icons.album),
+                              )
+                            : _detailPlaceholder(Icons.album),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(album.name,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 6),
+                            if (album.artistName != null)
+                              _metaRow(Icons.person_outline, album.artistName!),
+                            if (album.albumType != null)
+                              _metaRow(Icons.album_outlined,
+                                  album.albumType!.toUpperCase()),
+                            if (album.releaseDate != null)
+                              _metaRow(Icons.calendar_today_outlined,
+                                  album.releaseDate!),
+                            _metaRow(Icons.music_note,
+                                '${album.totalTracks} tracks'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                  _SpotifyButton(
+                    label: 'Open in Spotify',
+                    onPressed: () => SpotifyPlaybackService.openInSpotify(
+                      type: 'album',
+                      spotifyId: album.id,
+                      webUrl: album.spotifyUrl,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailPlaceholder(IconData icon) => Container(
+        width: 120,
+        height: 120,
+        color: const Color(0xFF1E293B),
+        child: Center(child: Icon(icon, color: Colors.white24, size: 48)),
+      );
+
+  Widget _metaRow(IconData icon, String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 14, color: Colors.white38),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(text,
+                  style: const TextStyle(color: Colors.white60, fontSize: 13)),
+            ),
+          ],
+        ),
+      );
+}
+
 // ── Shared widgets ────────────────────────────────────────────────────────────
+
+class _SpotifyButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onPressed;
+  const _SpotifyButton({required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      icon: const _SpotifyIcon(size: 18, color: Colors.white),
+      label: Text(label),
+      style: FilledButton.styleFrom(
+        backgroundColor: const Color(0xFF1DB954),
+        minimumSize: const Size(double.infinity, 48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      onPressed: onPressed,
+    );
+  }
+}
+
+class _SpotifyIcon extends StatelessWidget {
+  final double size;
+  final Color color;
+  const _SpotifyIcon({this.size = 20, this.color = const Color(0xFF1DB954)});
+
+  @override
+  Widget build(BuildContext context) {
+    return Icon(Icons.music_note_rounded, size: size, color: color);
+  }
+}
 
 class _Thumb extends StatelessWidget {
   final String? url;
@@ -766,8 +1261,8 @@ class _ArtPlaceholder extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: const Color(0xFF1E293B),
-      child:
-          const Center(child: Icon(Icons.music_note, color: Colors.white12, size: 80)),
+      child: const Center(
+          child: Icon(Icons.music_note, color: Colors.white12, size: 80)),
     );
   }
 }

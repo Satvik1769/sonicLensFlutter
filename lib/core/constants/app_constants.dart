@@ -8,4 +8,8 @@ class AppConstants {
 
   // Audio
   static const chunkDurationSeconds = 20;
+
+  // Spotify — fill in your Spotify Developer Dashboard credentials
+  static const spotifyClientId = 'ae08ae07d3b14832badc11cc9925fe38';
+  static const spotifyRedirectUrl = 'http://136.115.126.210:8082/callback';
 }
