@@ -65,8 +65,10 @@ class AppProvider extends ChangeNotifier {
   ApiService get _api =>
       ApiService(baseUrl: AppConstants.baseUrl, authToken: _authToken);
 
-  StreamSubscription? _chunkSub;
-  StreamSubscription? _errorSub;
+  StreamSubscription? _shizukuChunkSub;
+  StreamSubscription? _shizukuErrorSub;
+  StreamSubscription? _micChunkSub;
+  StreamSubscription? _micErrorSub;
 
   AppProvider(this._shizukuService) {
     _init();
@@ -80,14 +82,15 @@ class AppProvider extends ChangeNotifier {
       _backend = _shizukuAvailable
           ? CaptureBackend.shizuku
           : CaptureBackend.microphone;
-      _chunkSub = _shizukuService.chunkStream.listen(_onChunk);
-      _errorSub = _shizukuService.errorStream.listen(_onError);
+      _shizukuChunkSub = _shizukuService.chunkStream.listen(_onChunk);
+      _shizukuErrorSub = _shizukuService.errorStream.listen(_onError);
     } else {
       _backend = CaptureBackend.microphone;
     }
 
-    _chunkSub ??= _micService.chunkStream.listen(_onChunk);
-    _errorSub ??= _micService.errorStream.listen(_onError);
+    // Always listen to mic — used when backend is microphone or Shizuku unavailable
+    _micChunkSub = _micService.chunkStream.listen(_onChunk);
+    _micErrorSub = _micService.errorStream.listen(_onError);
 
     notifyListeners();
   }
@@ -186,18 +189,24 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _onChunk(Uint8List wavData) => _recognize(wavData);
+  void _onChunk(Uint8List wavData) {
+    debugPrint('🎵 onChunk: ${wavData.lengthInBytes} bytes — sending to API');
+    _recognize(wavData);
+  }
 
   Future<void> _recognize(Uint8List wavData) async {
     try {
       final song = await _api.recognizeChunk(wavData);
       if (song != null) {
+        debugPrint('✅ Recognized: ${song.title} by ${song.artist}');
         _latestRecognition = song;
         _history.insert(0, song);
         notifyListeners();
+      } else {
+        debugPrint('ℹ️ No match found for this chunk');
       }
     } catch (e) {
-      debugPrint('Recognition error: $e');
+      debugPrint('❌ Recognition error: $e');
     }
   }
 
@@ -254,8 +263,10 @@ class AppProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    _chunkSub?.cancel();
-    _errorSub?.cancel();
+    _shizukuChunkSub?.cancel();
+    _shizukuErrorSub?.cancel();
+    _micChunkSub?.cancel();
+    _micErrorSub?.cancel();
     _shizukuService.dispose();
     _micService.dispose();
     super.dispose();

@@ -24,10 +24,13 @@ class AudioCaptureService {
   /// Whether audio capture is supported on the current platform.
   static bool get isSupported => defaultTargetPlatform == TargetPlatform.android;
 
-  AudioCaptureService() {
-    if (isSupported) {
-      _subscription = _events.receiveBroadcastStream().listen(_onEvent);
-    }
+  AudioCaptureService();
+
+  /// Subscribe to the EventChannel. Called lazily on first capture so the
+  /// native StreamHandler is guaranteed to be registered by then.
+  void _ensureSubscribed() {
+    if (_subscription != null || !isSupported) return;
+    _subscription = _events.receiveBroadcastStream().listen(_onEvent);
   }
 
   void _onEvent(dynamic event) {
@@ -79,6 +82,7 @@ class AudioCaptureService {
 
   Future<void> startCapture() async {
     if (!isSupported) return;
+    _ensureSubscribed();
     try {
       await _method.invokeMethod('startCapture');
       _isListening = true;

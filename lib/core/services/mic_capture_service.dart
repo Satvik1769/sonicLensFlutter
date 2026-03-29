@@ -72,8 +72,11 @@ class MicCaptureService {
         final file = File(path);
         if (await file.exists()) {
           final bytes = await file.readAsBytes();
+          debugPrint('🎤 Mic chunk ready: ${bytes.lengthInBytes} bytes');
           _chunkController.add(bytes);
           _cleanupFile(path);
+        } else {
+          debugPrint('⚠️ Mic chunk file not found: $path');
         }
       } catch (e) {
         debugPrint('MicCaptureService error: $e');
