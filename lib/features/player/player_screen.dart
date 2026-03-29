@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
-import 'package:spotify_sdk/models/player_state.dart' as spdk;
 import '../../core/models/song.dart';
 import '../../core/models/trending.dart';
 import '../../core/providers/app_provider.dart';
 import '../../core/services/spotify_playback_service.dart';
 import '../../core/theme/app_theme.dart';
 
-enum _PlayMode { sdk, preview, none }
+enum _PlayMode { preview, none }
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
@@ -57,13 +56,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     final hasSpotifyId =
         song.spotifyTrackId != null && song.spotifyTrackId!.isNotEmpty;
 
-    if (hasSpotifyId) {
-      if (mounted) setState(() => _playMode = _PlayMode.sdk);
-      final ok = await provider.playViaSpotifySDK(song);
-      if (ok) return;
-      // SDK failed (Spotify not installed or auth failed)
-    }
-
     // Try 30-second preview URL (in-app playback)
     if (song.streamUrl != null) {
       if (mounted) setState(() => _playMode = _PlayMode.preview);
@@ -71,12 +63,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
 
-    // Nothing available in-app → open in Spotify (app or web)
-    await SpotifyPlaybackService.openInSpotify(
-      type: 'track',
-      spotifyId: song.spotifyTrackId,
-      webUrl: song.spotifyUrl,
-    );
+    // No preview → open in Spotify app or browser
+    if (hasSpotifyId || song.spotifyUrl != null) {
+      await SpotifyPlaybackService.openInSpotify(
+        type: 'track',
+        spotifyId: song.spotifyTrackId,
+        webUrl: song.spotifyUrl,
+      );
+    }
     if (mounted) setState(() => _playMode = _PlayMode.none);
   }
 
@@ -98,8 +92,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_playMode == _PlayMode.preview) {
       _previewPlayer.stop();
       _loadedSong = null;
-    } else if (_playMode == _PlayMode.sdk) {
-      provider.spotifyService.pause();
     }
     setState(() => _playMode = _PlayMode.none);
     provider.setCurrentSong(null);
@@ -222,113 +214,13 @@ class _PlayerScreenState extends State<PlayerScreen>
             ),
           ),
           const SizedBox(height: 16),
-          if (_playMode == _PlayMode.sdk && provider.spotifyConnected)
-            _buildSdkControls(provider)
-          else if (_playMode == _PlayMode.preview)
+          if (_playMode == _PlayMode.preview)
             ...[_buildPreviewProgressBar(song), _buildPreviewControls()]
-          else if (_playMode == _PlayMode.sdk && !provider.spotifyConnected)
-            // SDK mode but Spotify not installed — show loading until fallback resolves
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: CircularProgressIndicator(),
-            )
           else
             _buildOpenInSpotifyPrompt(song),
           const SizedBox(height: 32),
         ],
       ),
-    );
-  }
-
-  // ── SDK controls ──────────────────────────────────────────────────────────
-
-  Widget _buildSdkControls(AppProvider provider) {
-    return StreamBuilder<spdk.PlayerState>(
-      stream: provider.spotifyService.playerStateStream,
-      builder: (context, snapshot) {
-        final state = snapshot.data;
-        final paused = state?.isPaused ?? true;
-        final posMs = state?.playbackPosition ?? 0;
-        final durMs = state?.track?.duration ?? provider.currentSong?.durationMs ?? 0;
-        final progress = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            children: [
-              SliderTheme(
-                data: SliderThemeData(
-                  trackHeight: 3,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  activeTrackColor: AppTheme.radarGlow,
-                  inactiveTrackColor: Colors.white12,
-                  thumbColor: Colors.white,
-                ),
-                child: Slider(
-                  value: progress.toDouble(),
-                  onChanged: (v) => provider.spotifyService
-                      .seekTo((v * durMs).round()),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(_fmtMs(posMs),
-                        style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                    Text(_fmtMs(durMs),
-                        style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.skip_previous_rounded,
-                        color: Colors.white, size: 40),
-                    onPressed: () {},
-                  ),
-                  GestureDetector(
-                    onTap: paused
-                        ? provider.spotifyService.resume
-                        : provider.spotifyService.pause,
-                    child: Container(
-                      width: 64,
-                      height: 64,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppTheme.radarInner,
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.radarInner.withValues(alpha: 0.4),
-                            blurRadius: 20,
-                            spreadRadius: 2,
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        paused
-                            ? Icons.play_arrow_rounded
-                            : Icons.pause_rounded,
-                        color: Colors.white,
-                        size: 36,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.skip_next_rounded,
-                        color: Colors.white, size: 40),
-                    onPressed: () {},
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 

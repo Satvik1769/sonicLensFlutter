@@ -33,8 +33,7 @@ dependencies:
   # State management
   provider: ^6.1.2
 
-  # Spotify
-  spotify_sdk: ^3.0.0
+  # Spotify deep links
   url_launcher: ^6.3.0
 
   # UI
