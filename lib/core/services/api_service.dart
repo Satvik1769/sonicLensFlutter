@@ -59,7 +59,7 @@ class ApiService {
     final request = http.MultipartRequest('POST', _uri('/recognize'))
       ..headers.addAll(_authHeader)
       ..files.add(http.MultipartFile.fromBytes(
-        'audio',
+        'file',
         wavBytes,
         filename: 'capture_${DateTime.now().millisecondsSinceEpoch}.wav',
       ));

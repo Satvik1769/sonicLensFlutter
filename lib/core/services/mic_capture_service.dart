@@ -52,7 +52,7 @@ class MicCaptureService {
           const RecordConfig(
             encoder: AudioEncoder.wav,
             sampleRate: 44100,
-            numChannels: 1, // mono is enough for recognition
+            numChannels: 1,
             bitRate: 128000,
           ),
           path: path,
@@ -63,7 +63,13 @@ class MicCaptureService {
 
         if (!_running) {
           await _recorder.stop();
-          _cleanupFile(path);
+          final partialFile = File(path);
+          if (await partialFile.exists()) {
+            final bytes = await partialFile.readAsBytes();
+            debugPrint('🎤 Mic chunk ready (partial): ${bytes.lengthInBytes} bytes');
+            if (bytes.isNotEmpty) _chunkController.add(bytes);
+            _cleanupFile(path);
+          }
           break;
         }
 
