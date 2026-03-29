@@ -53,9 +53,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     // Show the player immediately so UI doesn't feel unresponsive
     provider.setCurrentSong(song);
 
-    final hasSpotifyId =
-        song.spotifyTrackId != null && song.spotifyTrackId!.isNotEmpty;
-
     // Try 30-second preview URL (in-app playback)
     if (song.streamUrl != null) {
       if (mounted) setState(() => _playMode = _PlayMode.preview);
@@ -63,14 +60,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       return;
     }
 
-    // No preview → open in Spotify app or browser
-    if (hasSpotifyId || song.spotifyUrl != null) {
-      await SpotifyPlaybackService.openInSpotify(
-        type: 'track',
-        spotifyId: song.spotifyTrackId,
-        webUrl: song.spotifyUrl,
-      );
-    }
+    // No preview → show player with song info; user can tap Spotify icon to open
     if (mounted) setState(() => _playMode = _PlayMode.none);
   }
 
