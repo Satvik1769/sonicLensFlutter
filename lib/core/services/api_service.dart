@@ -62,8 +62,8 @@ class ApiService {
       ..files.add(http.MultipartFile.fromBytes(
         'file',
         wavBytes,
-        filename: 'capture_${DateTime.now().millisecondsSinceEpoch}.m4a',
-        contentType: MediaType('audio', 'mp4'),
+        filename: 'capture_${DateTime.now().millisecondsSinceEpoch}.wav',
+        contentType: MediaType('audio', 'wav'),
       ));
 
     final streamed =

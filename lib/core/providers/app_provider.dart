@@ -202,7 +202,7 @@ class AppProvider extends ChangeNotifier {
   Future<void> _saveChunkForDebug(Uint8List data) async {
     try {
       final dir = await getExternalStorageDirectory();
-      final file = File('${dir!.path}/capture_latest.m4a');
+      final file = File('${dir!.path}/capture_latest.wav');
       await file.writeAsBytes(data);
       debugPrint('💾 Chunk saved to ${file.path}');
     } catch (e) {
