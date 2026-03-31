@@ -51,9 +51,12 @@ class MicCaptureService {
         await _recorder.start(
           const RecordConfig(
             encoder: AudioEncoder.aacLc,
-            sampleRate: 44100,
+            sampleRate: 16000,
             numChannels: 1,
             bitRate: 128000,
+            autoGain: false,
+            echoCancel: false,
+            noiseSuppress: false,
           ),
           path: path,
         );

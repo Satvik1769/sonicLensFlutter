@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/app_constants.dart';
 import '../models/song.dart';
@@ -191,7 +193,21 @@ class AppProvider extends ChangeNotifier {
 
   void _onChunk(Uint8List wavData) {
     debugPrint('🎵 onChunk: ${wavData.lengthInBytes} bytes — sending to API');
+    _saveChunkForDebug(wavData);
     _recognize(wavData);
+  }
+
+  /// Saves the latest captured chunk to external storage for manual inspection.
+  /// Overwrites the same file each time — check it with a file manager.
+  Future<void> _saveChunkForDebug(Uint8List data) async {
+    try {
+      final dir = await getExternalStorageDirectory();
+      final file = File('${dir!.path}/capture_latest.m4a');
+      await file.writeAsBytes(data);
+      debugPrint('💾 Chunk saved to ${file.path}');
+    } catch (e) {
+      debugPrint('⚠️ Could not save chunk: $e');
+    }
   }
 
   Future<void> _recognize(Uint8List wavData) async {

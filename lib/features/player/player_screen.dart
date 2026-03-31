@@ -1,5 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/song.dart';
 import '../../core/models/trending.dart';
@@ -22,6 +26,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   final _previewPlayer = AudioPlayer();
   Song? _loadedSong;
   bool _previewLoading = false;
+  bool _downloading = false;
+
+  // Whether capture was active before we paused it for preview playback
+  bool _wasCapturing = false;
 
   _PlayMode _playMode = _PlayMode.none;
 
@@ -52,6 +60,15 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _onTrackTap(Song song, AppProvider provider) async {
     // Show the player immediately so UI doesn't feel unresponsive
     provider.setCurrentSong(song);
+
+    // REMOTE_SUBMIX (Shizuku capture) intercepts all audio output and can
+    // force it through a virtual mixer at a mismatched sample rate, causing
+    // the preview to play back at the wrong speed (high-pitched chipmunk sound).
+    // Stop capture while preview is playing; resume when user exits the player.
+    if (provider.captureState == CaptureState.listening) {
+      _wasCapturing = true;
+      await provider.stopCapture();
+    }
 
     // Try 30-second preview URL (in-app playback)
     if (song.streamUrl != null) {
@@ -85,6 +102,43 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     setState(() => _playMode = _PlayMode.none);
     provider.setCurrentSong(null);
+
+    // Resume capture that was paused for preview playback
+    if (_wasCapturing) {
+      _wasCapturing = false;
+      provider.startCapture();
+    }
+  }
+
+  // ── Download ──────────────────────────────────────────────────────────────
+
+  Future<void> _downloadPreview(Song song) async {
+    if (song.streamUrl == null) return;
+    setState(() => _downloading = true);
+    try {
+      final response = await http.get(Uri.parse(song.streamUrl!));
+      final dir = await getExternalStorageDirectory();
+      final safeTitle =
+          song.title.replaceAll(RegExp(r'[^\w\s\-]'), '').trim();
+      final file = File('${dir!.path}/${safeTitle}_preview.mp3');
+      await file.writeAsBytes(response.bodyBytes);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saved: ${file.path}'),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Download failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
   }
 
   // ── Search ────────────────────────────────────────────────────────────────
@@ -205,7 +259,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
           const SizedBox(height: 16),
           if (_playMode == _PlayMode.preview)
-            ...[_buildPreviewProgressBar(song), _buildPreviewControls()]
+            ...[_buildPreviewProgressBar(song), _buildPreviewControls(song)]
           else
             _buildOpenInSpotifyPrompt(song),
           const SizedBox(height: 32),
@@ -275,7 +329,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  Widget _buildPreviewControls() {
+  Widget _buildPreviewControls(Song song) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(32, 8, 32, 0),
       child: Row(
@@ -327,6 +381,20 @@ class _PlayerScreenState extends State<PlayerScreen>
             icon: const Icon(Icons.skip_next_rounded,
                 color: Colors.white, size: 40),
             onPressed: () {},
+          ),
+          // Download button — saves preview MP3 for offline verification
+          IconButton(
+            tooltip: 'Download preview',
+            icon: _downloading
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                        color: Colors.white54, strokeWidth: 2),
+                  )
+                : const Icon(Icons.download_rounded,
+                    color: Colors.white54, size: 28),
+            onPressed: _downloading ? null : () => _downloadPreview(song),
           ),
         ],
       ),
