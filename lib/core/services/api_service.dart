@@ -83,7 +83,7 @@ class ApiService {
     if (streamed.statusCode != 200) return null;
 
     final json = jsonDecode(body) as Map<String, dynamic>;
-    if (json['recognized'] != true) return null;
+    if (json['recognized'] != true && json['matched'] != true) return null;
     return RecognizedSong.fromRecognizeJson(json);
   }
 

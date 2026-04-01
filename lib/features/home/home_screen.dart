@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../core/models/song.dart';
 import '../../core/providers/app_provider.dart';
 import '../../core/services/audio_capture_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -50,19 +52,23 @@ class _HomeScreenState extends State<HomeScreen>
     return Consumer<AppProvider>(builder: (context, provider, _) {
       _syncAnimation(provider.captureState);
 
+      final result = provider.latestRecognition;
+
       return Scaffold(
         body: SafeArea(
-          child: Column(
-            children: [
-              _buildHeader(provider),
-              Expanded(child: _buildRadar(provider)),
-              // Android only: backend switcher (Shizuku vs mic)
-              if (AudioCaptureService.isSupported)
-                _BackendSwitcher(provider: provider),
-              _buildStatusArea(provider),
-              const SizedBox(height: 32),
-            ],
-          ),
+          child: result != null
+              ? _ResultView(song: result, provider: provider)
+              : Column(
+                  children: [
+                    _buildHeader(provider),
+                    Expanded(child: _buildRadar(provider)),
+                    // Android only: backend switcher (Shizuku vs mic)
+                    if (AudioCaptureService.isSupported)
+                      _BackendSwitcher(provider: provider),
+                    _buildStatusArea(provider),
+                    const SizedBox(height: 32),
+                  ],
+                ),
         ),
       );
     });
@@ -164,8 +170,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildStatusArea(AppProvider provider) {
-    final latest = provider.latestRecognition;
-
     if (provider.captureState == CaptureState.error &&
         provider.errorMessage != null) {
       return Padding(
@@ -184,10 +188,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
       );
-    }
-
-    if (latest != null) {
-      return _RecognitionCard(song: latest);
     }
 
     final isMic = provider.backend == CaptureBackend.microphone;
@@ -259,65 +259,189 @@ class _RadarRing extends StatelessWidget {
   }
 }
 
-class _RecognitionCard extends StatelessWidget {
-  final dynamic song;
-  const _RecognitionCard({required this.song});
+class _ResultView extends StatelessWidget {
+  final RecognizedSong song;
+  final AppProvider provider;
+  const _ResultView({required this.song, required this.provider});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E293B),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.radarInner.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          children: [
-            if (song.artworkUrl != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  song.artworkUrl!,
-                  width: 56,
-                  height: 56,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const _PlaceholderArt(size: 56),
-                ),
-              )
-            else
-              const _PlaceholderArt(size: 56),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    song.title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    song.artist,
-                    style: const TextStyle(color: Colors.white60, fontSize: 13),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+    return Column(
+      children: [
+        // Header with back button
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 24, 0),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white70),
+                onPressed: provider.clearRecognition,
               ),
-            ),
-            const Icon(Icons.check_circle, color: AppTheme.radarGlow, size: 20),
-          ],
+              const Spacer(),
+              const Text(
+                'SonicLens',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 1,
+                ),
+              ),
+              const Spacer(),
+              const SizedBox(width: 48), // balance the back button
+            ],
+          ),
         ),
-      ),
+
+        const Spacer(),
+
+        // Artwork
+        Container(
+          width: 220,
+          height: 220,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.radarInner.withValues(alpha: 0.4),
+                blurRadius: 48,
+                spreadRadius: 8,
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: song.artworkUrl != null
+                ? Image.network(
+                    song.artworkUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const _PlaceholderArt(size: 220),
+                  )
+                : const _PlaceholderArt(size: 220),
+          ),
+        ),
+
+        const SizedBox(height: 32),
+
+        // Match badge
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppTheme.radarGlow.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.radarGlow.withValues(alpha: 0.5)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle, color: AppTheme.radarGlow, size: 14),
+              const SizedBox(width: 6),
+              Text(
+                'Match found · ${(song.confidence * 100).round()}%',
+                style: const TextStyle(
+                  color: AppTheme.radarGlow,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Title + Artist
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            song.title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            song.artist,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white60, fontSize: 16),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (song.album != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            song.album!,
+            style: const TextStyle(color: Colors.white38, fontSize: 13),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+
+        const Spacer(),
+
+        // Action buttons
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            children: [
+              if (song.spotifyUrl != null)
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1DB954),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text(
+                      'Open in Spotify',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                    ),
+                    onPressed: () => launchUrl(
+                      Uri.parse(song.spotifyUrl!),
+                      mode: LaunchMode.externalApplication,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text(
+                    'Listen Again',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  ),
+                  onPressed: provider.clearRecognition,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 40),
+      ],
     );
   }
 }

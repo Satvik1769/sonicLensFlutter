@@ -246,13 +246,19 @@ class AppProvider extends ChangeNotifier {
         debugPrint('✅ Recognized: ${song.title} by ${song.artist}');
         _latestRecognition = song;
         _history.insert(0, song);
-        notifyListeners();
+        await stopCapture();
       } else {
         debugPrint('ℹ️ No match found for this chunk');
+        notifyListeners();
       }
     } catch (e) {
       debugPrint('❌ Recognition error: $e');
     }
+  }
+
+  void clearRecognition() {
+    _latestRecognition = null;
+    notifyListeners();
   }
 
   // ── Library ───────────────────────────────────────────────────────────────
