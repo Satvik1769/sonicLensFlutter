@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -99,7 +100,29 @@ class AppProvider extends ChangeNotifier {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    _authToken = prefs.getString(AppConstants.prefAuthToken);
+    final token = prefs.getString(AppConstants.prefAuthToken);
+    if (token != null && _isTokenExpired(token)) {
+      debugPrint('⚠️ Stored auth token expired — clearing');
+      await prefs.remove(AppConstants.prefAuthToken);
+      _authToken = null;
+    } else {
+      _authToken = token;
+    }
+  }
+
+  /// Returns true if [token] is a JWT whose [exp] claim is in the past.
+  bool _isTokenExpired(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return true;
+      final payload = base64Url.normalize(parts[1]);
+      final map = jsonDecode(utf8.decode(base64Url.decode(payload))) as Map<String, dynamic>;
+      final exp = map['exp'] as int?;
+      if (exp == null) return false;
+      return DateTime.now().millisecondsSinceEpoch ~/ 1000 >= exp;
+    } catch (_) {
+      return true;
+    }
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -211,6 +234,12 @@ class AppProvider extends ChangeNotifier {
   }
 
   Future<void> _recognize(Uint8List wavData) async {
+    if (_authToken == null || _isTokenExpired(_authToken!)) {
+      debugPrint('⚠️ Token expired — please log in again');
+      await logout();
+      _setError('Session expired. Please log in again.');
+      return;
+    }
     try {
       final song = await _api.recognizeChunk(wavData);
       if (song != null) {

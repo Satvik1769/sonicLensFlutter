@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/cupertino.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import '../models/song.dart';
@@ -23,11 +24,14 @@ class ApiService {
   /// Returns the JWT token on success, null on failure.
   Future<String?> login(String username, String password) async {
     try {
+      final body = jsonEncode({'email': username, 'password': password});
+      _logCurl('POST', _uri('/auth/login'),
+          headers: {'Content-Type': 'application/json'}, body: body);
       final res = await http
           .post(
             _uri('/auth/login'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'email': username, 'password': password}),
+            body: body,
           )
           .timeout(const Duration(seconds: 60));
       if (res.statusCode != 200) return null;
@@ -41,11 +45,14 @@ class ApiService {
   /// Returns true if registration succeeded.
   Future<bool> register(String username, String password, String email) async {
     try {
+      final body = jsonEncode({'username': username, 'password': password, 'email': email});
+      _logCurl('POST', _uri('/auth/register'),
+          headers: {'Content-Type': 'application/json'}, body: body);
       final res = await http
           .post(
             _uri('/auth/register'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'username': username, 'password': password, 'email' : email }),
+            body: body,
           )
           .timeout(const Duration(seconds: 15));
       return res.statusCode == 200 || res.statusCode == 201;
@@ -66,9 +73,13 @@ class ApiService {
         contentType: MediaType('audio', 'wav'),
       ));
 
+    debugPrint('🔑 Auth token: ${authToken != null ? 'present (${authToken!.length} chars)' : 'MISSING'}');
+    _logMultipartCurl(_uri('/recognize'), Map<String, String>.from(request.headers)..addAll(_authHeader),
+        'capture_${DateTime.now().millisecondsSinceEpoch}.wav');
     final streamed =
         await request.send().timeout(const Duration(seconds: 30));
     final body = await streamed.stream.bytesToString();
+    debugPrint('🌐 /recognize → ${streamed.statusCode}: $body');
     if (streamed.statusCode != 200) return null;
 
     final json = jsonDecode(body) as Map<String, dynamic>;
@@ -80,6 +91,7 @@ class ApiService {
 
   Future<List<Song>> fetchSongs() async {
     try {
+      _logCurl('GET', _uri('/songs'), headers: _authHeader);
       final res = await http
           .get(_uri('/songs'), headers: _authHeader)
           .timeout(const Duration(seconds: 10));
@@ -93,11 +105,10 @@ class ApiService {
   Future<List<Song>> searchSongs(String query) async {
     if (query.trim().isEmpty) return [];
     try {
+      final searchUri = _uri('/songs/search?q=${Uri.encodeQueryComponent(query.trim())}');
+      _logCurl('GET', searchUri, headers: _authHeader);
       final res = await http
-          .get(
-            _uri('/songs/search?q=${Uri.encodeQueryComponent(query.trim())}'),
-            headers: _authHeader,
-          )
+          .get(searchUri, headers: _authHeader)
           .timeout(const Duration(seconds: 10));
       if (res.statusCode != 200) return [];
       return _parseSongList(jsonDecode(res.body));
@@ -110,6 +121,7 @@ class ApiService {
 
   Future<List<RecognizedSong>> fetchHistory() async {
     try {
+      _logCurl('GET', _uri('/history'), headers: _authHeader);
       final res = await http
           .get(_uri('/history'), headers: _authHeader)
           .timeout(const Duration(seconds: 10));
@@ -131,6 +143,7 @@ class ApiService {
 
   Future<TrendingResponse?> fetchTrending() async {
     try {
+      _logCurl('GET', _uri('/trending'), headers: _authHeader);
       final res = await http
           .get(_uri('/trending'), headers: _authHeader)
           .timeout(const Duration(seconds: 60));
@@ -140,6 +153,25 @@ class ApiService {
     } catch (_) {
       return null;
     }
+  }
+
+  // ── Curl Logger ───────────────────────────────────────────────────────────
+
+  void _logCurl(String method, Uri uri,
+      {Map<String, String>? headers, String? body}) {
+    final buf = StringBuffer('curl -X $method');
+    headers?.forEach((k, v) => buf.write(" -H '$k: $v'"));
+    if (body != null) buf.write(" -d '$body'");
+    buf.write(" '${uri.toString()}'");
+    debugPrint('🔗 $buf');
+  }
+
+  void _logMultipartCurl(Uri uri, Map<String, String> headers, String filename) {
+    final buf = StringBuffer('curl -X POST');
+    headers.forEach((k, v) => buf.write(" -H '$k: $v'"));
+    buf.write(" -F 'file=@$filename'");
+    buf.write(" '${uri.toString()}'");
+    debugPrint('🔗 $buf');
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

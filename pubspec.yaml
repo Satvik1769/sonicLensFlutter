@@ -19,6 +19,7 @@ dependencies:
 
   # HTTP & networking
   http: ^1.2.2
+  http_parser: ^4.0.0
 
   # Storage & preferences
   path_provider: ^2.1.4
