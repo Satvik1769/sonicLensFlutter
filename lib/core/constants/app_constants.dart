@@ -4,7 +4,7 @@ class AppConstants {
   static const eventChannel = 'com.sonicLens/audio_events';
 
   static const prefAuthToken = 'auth_token';
-  static const baseUrl = 'http://136.115.126.210:8082';
+  static const baseUrl = 'http://34.60.181.59:8082';
 
   // Audio
   static const chunkDurationSeconds = 20;
