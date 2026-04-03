@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f0c29"/>
+      <stop offset="100%" stop-color="#0d1b2a"/>
+    </linearGradient>
+
+    <!-- Horizontal wave gradient left→right -->
+    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#a855f7"/>
+      <stop offset="50%"  stop-color="#e879f9"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+
+    <!-- Radial glow behind bars -->
+    <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#a855f7" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Glow filter for bars -->
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- ── Background ── -->
+  <circle cx="256" cy="256" r="256" fill="url(#bgGrad)"/>
+
+  <!-- Subtle outer border -->
+  <circle cx="256" cy="256" r="246" fill="none" stroke="#a855f7" stroke-width="1" opacity="0.2"/>
+
+  <!-- Concentric sonic-wave rings (decorative, very faint) -->
+  <circle cx="256" cy="256" r="175" fill="none" stroke="url(#waveGrad)" stroke-width="1.5" opacity="0.10"/>
+  <circle cx="256" cy="256" r="215" fill="none" stroke="url(#waveGrad)" stroke-width="1"   opacity="0.07"/>
+  <circle cx="256" cy="256" r="235" fill="none" stroke="url(#waveGrad)" stroke-width="1"   opacity="0.04"/>
+
+  <!-- Radial glow blob behind bars -->
+  <ellipse cx="256" cy="256" rx="210" ry="130" fill="url(#centerGlow)"/>
+
+  <!-- ── Audio waveform bars ──
+       11 bars · width=22 · gap=10
+       total span = 11×22 + 10×10 = 342 px
+       startX = 256 − 171 = 85
+       each bar is vertically centred at y=256 → y = 256 − h/2
+  -->
+  <g filter="url(#glow)">
+    <!-- bar  1  h=44  -->
+    <rect x="85"  y="234" width="22" height="44"  rx="11" fill="url(#waveGrad)" opacity="0.78"/>
+    <!-- bar  2  h=82  -->
+    <rect x="117" y="215" width="22" height="82"  rx="11" fill="url(#waveGrad)" opacity="0.88"/>
+    <!-- bar  3  h=124 -->
+    <rect x="149" y="194" width="22" height="124" rx="11" fill="url(#waveGrad)" opacity="0.95"/>
+    <!-- bar  4  h=68  -->
+    <rect x="181" y="222" width="22" height="68"  rx="11" fill="url(#waveGrad)" opacity="0.85"/>
+    <!-- bar  5  h=158 (tallest) -->
+    <rect x="213" y="177" width="22" height="158" rx="11" fill="url(#waveGrad)"/>
+    <!-- bar  6  h=96  -->
+    <rect x="245" y="208" width="22" height="96"  rx="11" fill="url(#waveGrad)" opacity="0.95"/>
+    <!-- bar  7  h=148 -->
+    <rect x="277" y="182" width="22" height="148" rx="11" fill="url(#waveGrad)"/>
+    <!-- bar  8  h=62  -->
+    <rect x="309" y="225" width="22" height="62"  rx="11" fill="url(#waveGrad)" opacity="0.85"/>
+    <!-- bar  9  h=112 -->
+    <rect x="341" y="200" width="22" height="112" rx="11" fill="url(#waveGrad)" opacity="0.95"/>
+    <!-- bar 10  h=76  -->
+    <rect x="373" y="218" width="22" height="76"  rx="11" fill="url(#waveGrad)" opacity="0.88"/>
+    <!-- bar 11  h=40  -->
+    <rect x="405" y="236" width="22" height="40"  rx="11" fill="url(#waveGrad)" opacity="0.78"/>
+  </g>
+</svg>

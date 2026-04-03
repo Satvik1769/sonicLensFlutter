@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/app_provider.dart';
 import '../../core/theme/app_theme.dart';
@@ -177,24 +178,10 @@ class _Logo extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Container(
-          width: 72,
-          height: 72,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const RadialGradient(
-              colors: [AppTheme.radarGlow, AppTheme.radarInner],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.radarInner.withValues(alpha: 0.5),
-                blurRadius: 28,
-                spreadRadius: 4,
-              ),
-            ],
-          ),
-          child: const Icon(Icons.graphic_eq_rounded,
-              color: Colors.white, size: 36),
+        SvgPicture.asset(
+          'assets/images/logo.svg',
+          width: 96,
+          height: 96,
         ),
         const SizedBox(height: 16),
         const Text(
