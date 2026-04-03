@@ -68,6 +68,8 @@ class AppProvider extends ChangeNotifier {
   ApiService get _api =>
       ApiService(baseUrl: AppConstants.baseUrl, authToken: _authToken);
 
+  bool _recognizing = false;
+
   StreamSubscription? _shizukuChunkSub;
   StreamSubscription? _shizukuErrorSub;
   StreamSubscription? _micChunkSub;
@@ -91,9 +93,12 @@ class AppProvider extends ChangeNotifier {
       _backend = CaptureBackend.microphone;
     }
 
-    // Always listen to mic — used when backend is microphone or Shizuku unavailable
-    _micChunkSub = _micService.chunkStream.listen(_onChunk);
-    _micErrorSub = _micService.errorStream.listen(_onError);
+    // Only subscribe mic when it is the active backend — prevents double-firing
+    // when Shizuku is running (both streams would otherwise call _onChunk).
+    if (_backend == CaptureBackend.microphone) {
+      _micChunkSub = _micService.chunkStream.listen(_onChunk);
+      _micErrorSub = _micService.errorStream.listen(_onError);
+    }
 
     notifyListeners();
   }
@@ -215,6 +220,10 @@ class AppProvider extends ChangeNotifier {
   }
 
   void _onChunk(Uint8List wavData) {
+    if (_recognizing || _latestRecognition != null) {
+      debugPrint('⏭️ Skipping chunk — already recognizing or song already found');
+      return;
+    }
     debugPrint('🎵 onChunk: ${wavData.lengthInBytes} bytes — sending to API');
     _saveChunkForDebug(wavData);
     _recognize(wavData);
@@ -234,13 +243,14 @@ class AppProvider extends ChangeNotifier {
   }
 
   Future<void> _recognize(Uint8List wavData) async {
-    if (_authToken == null || _isTokenExpired(_authToken!)) {
-      debugPrint('⚠️ Token expired — please log in again');
-      await logout();
-      _setError('Session expired. Please log in again.');
-      return;
-    }
+    _recognizing = true;
     try {
+      if (_authToken == null || _isTokenExpired(_authToken!)) {
+        debugPrint('⚠️ Token expired — please log in again');
+        await logout();
+        _setError('Session expired. Please log in again.');
+        return;
+      }
       final song = await _api.recognizeChunk(wavData);
       if (song != null) {
         debugPrint('✅ Recognized: ${song.title} by ${song.artist}');
@@ -253,6 +263,8 @@ class AppProvider extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('❌ Recognition error: $e');
+    } finally {
+      _recognizing = false;
     }
   }
 
